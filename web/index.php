@@ -204,6 +204,7 @@ if ($selectedCustomerNo !== '' && !in_array($selectedCustomerNo, $customerOption
 }
 
 $today = new DateTime('today');
+$todayFormatted = format_date_nl($today->format('Y-m-d'));
 $groups = [];
 
 foreach ($entries as $entry) {
@@ -390,6 +391,12 @@ $baseQueryParams = [
             align-items: center;
         }
 
+        .print-date {
+            display: none;
+            font-size: 14px;
+            color: var(--muted);
+        }
+
         select,
         input,
         button {
@@ -548,6 +555,10 @@ $baseQueryParams = [
             .controls {
                 display: none !important;
             }
+
+            .print-date {
+                display: block !important;
+            }
         }
 
         @media (max-width: 900px) {
@@ -596,6 +607,7 @@ $baseQueryParams = [
 <body>
     <header>
         <h1>Openstaande posten debiteuren - <span class="company-name"><?= $selectedCompany ?></span></h1>
+        <div class="print-date">Datum: <?= htmlspecialchars($todayFormatted) ?></div>
         <form class="controls" method="get">
             <label>
                 <select id="companySelect" name="company">
