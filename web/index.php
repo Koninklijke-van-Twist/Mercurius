@@ -14,9 +14,9 @@ if (!in_array($selectedCompany, $companies, true)) {
     $selectedCompany = $companies[0];
 }
 
-$filter = $_GET['filter'] ?? 'all';
+$filter = $_GET['filter'] ?? 'overdue';
 if (!in_array($filter, ['all', 'overdue'], true)) {
-    $filter = 'all';
+    $filter = 'overdue';
 }
 
 $search = trim((string) ($_GET['search'] ?? ''));
@@ -112,7 +112,7 @@ $customerUrl = odata_company_url(
     $selectedCompany,
     'AppCustomerCard',
     [
-        '$select' => 'No,Name,City,Phone_No',
+        '$select' => 'No,Name,City,E_Mail,Phone_No',
     ]
 );
 
@@ -227,6 +227,7 @@ foreach ($entries as $entry) {
             (string) ($customerInfo['Name'] ?? ''),
             (string) ($customerInfo['City'] ?? ''),
             (string) ($customerInfo['Phone_No'] ?? ''),
+            (string) ($customerInfo['E_Mail'] ?? ''),
         ]);
 
         if (strpos(strtolower($searchHaystack), $searchLower) === false) {
@@ -242,6 +243,7 @@ foreach ($entries as $entry) {
                 'Name' => (string) ($entry['Customer_Name'] ?? ''),
                 'City' => '',
                 'Phone_No' => '',
+                'E_Mail' => '',
             ],
             'entries' => [],
             'total' => 0.0,
@@ -547,7 +549,7 @@ $baseQueryParams = [
                     <?php endforeach; ?>
                 </select>
             </label>
-            
+
             <label>
                 <input type="text" name="search" value="<?= htmlspecialchars($search) ?>"
                     placeholder="Zoek in alle tekst" />
@@ -580,18 +582,31 @@ $baseQueryParams = [
         $customerFilterParams = array_merge($baseQueryParams, ['customer_no' => $customerNoValue]);
         $customerLink = '?' . http_build_query($customerFilterParams, '', '&', PHP_QUERY_RFC3986);
         $phone = trim((string) ($customer['Phone_No'] ?? ''));
+        $email = trim((string) ($customer['E_Mail'] ?? ''));
         $phoneLink = $phone !== '' ? 'tel:' . preg_replace('/[^0-9+]/', '', $phone) : '';
+        $mailLink = $email !== '' ? 'mailto:' . $email : '';
         ?>
         <section class="group">
             <hr>
             <div class="customer-header">
-                <div>Debiteur: <a class="customer-no" href="<?= htmlspecialchars($customerLink) ?>"><?= htmlspecialchars($customerNoValue) ?></a></div>
+                <div>Debiteur: <a class="customer-no"
+                        href="<?= htmlspecialchars($customerLink) ?>"><?= htmlspecialchars($customerNoValue) ?></a></div>
                 <div><?= htmlspecialchars((string) ($customer['Name'] ?? '')) ?></div>
                 <div><span>Woonplaats:</span> <?= htmlspecialchars((string) ($customer['City'] ?? '')) ?></div>
                 <div>
                     <span>Telefoon:</span>
                     <?php if ($phoneLink): ?>
                         <a href="<?= htmlspecialchars($phoneLink) ?>"><?= htmlspecialchars($phone) ?></a>
+                    <?php else: ?>
+                        <span class="muted">n.v.t.</span>
+                    <?php endif; ?>
+                </div>
+                <div>
+                    <span>Email:</span>
+                    <?php if ($mailLink): ?>
+                        <a href="<?= htmlspecialchars($mailLink) ?>">
+                            <?= strtolower(htmlspecialchars($email)) ?>
+                        </a>
                     <?php else: ?>
                         <span class="muted">n.v.t.</span>
                     <?php endif; ?>
@@ -662,7 +677,8 @@ $baseQueryParams = [
                         </tr>
                     <?php endforeach; ?>
                     <tr class="total-row">
-                        <td colspan="3">Totaal voor debiteur <span class="customer-no"><?= htmlspecialchars((string) ($customer['No'] ?? '')) ?></span></td>
+                        <td colspan="3">Totaal voor debiteur <span
+                                class="customer-no"><?= htmlspecialchars((string) ($customer['No'] ?? '')) ?></span></td>
                         <?php
                         $totalParts = [];
                         foreach ($group['totals_by_currency'] as $code => $totalAmount) {
@@ -681,14 +697,17 @@ $baseQueryParams = [
 </body>
 
 <script>
-    (function () {
+    (function ()
+    {
         const body = document.body;
         const companySelect = document.getElementById('companySelect');
         const customerSelect = document.getElementById('customerSelect');
         const dueBeforeInput = document.getElementById('dueBeforeInput');
 
-        function addHoverClass(element, className) {
-            if (!element) {
+        function addHoverClass (element, className)
+        {
+            if (!element)
+            {
                 return;
             }
             const addClass = () => body.classList.add(className);
