@@ -107,6 +107,38 @@ function format_amount_with_currency(float $amount, string $currencyCode): strin
     return $symbol . ' ' . $formatted;
 }
 
+function format_date_nl(?string $dateValue): string
+{
+    if ($dateValue === null || trim($dateValue) === '') {
+        return '';
+    }
+
+    try {
+        $date = new DateTime($dateValue);
+    } catch (Exception $exception) {
+        return $dateValue;
+    }
+
+    $months = [
+        1 => 'januari',
+        2 => 'februari',
+        3 => 'maart',
+        4 => 'april',
+        5 => 'mei',
+        6 => 'juni',
+        7 => 'juli',
+        8 => 'augustus',
+        9 => 'september',
+        10 => 'oktober',
+        11 => 'november',
+        12 => 'december',
+    ];
+
+    $monthIndex = (int) $date->format('n');
+    $monthName = $months[$monthIndex] ?? '';
+    return $date->format('j') . ' ' . $monthName . ' ' . $date->format('Y');
+}
+
 $customerUrl = odata_company_url(
     $environment,
     $selectedCompany,
@@ -405,16 +437,20 @@ $baseQueryParams = [
         }
 
         @keyframes shake {
+
             0%,
             100% {
                 transform: translateX(0);
             }
+
             25% {
                 transform: translateX(-3px);
             }
+
             50% {
                 transform: translateX(3px);
             }
+
             75% {
                 transform: translateX(-2px);
             }
@@ -597,7 +633,8 @@ $baseQueryParams = [
                     <option value="both" <?= $openFilter === 'both' ? 'selected' : '' ?>>Beide</option>
                 </select>
             </label>
-            <button id="filterAllButton" type="submit" name="filter" value="all" class="<?= $filter === 'all' ? 'filter-active' : '' ?>">Alle
+            <button id="filterAllButton" type="submit" name="filter" value="all"
+                class="<?= $filter === 'all' ? 'filter-active' : '' ?>">Alle
                 posten</button>
             <button type="submit" name="filter" value="overdue"
                 class="<?= $filter === 'overdue' ? 'filter-active' : '' ?>">Vervallen posten</button>
@@ -673,6 +710,8 @@ $baseQueryParams = [
                         }
                         $dateMade = $entry['Document_Date'] ?? $entry['Posting_Date'] ?? '';
                         $dateDue = $entry['Due_Date'] ?? '';
+                        $dateMadeDisplay = format_date_nl($dateMade);
+                        $dateDueDisplay = format_date_nl($dateDue);
                         $currencyCode = $entry['_currency_code'] !== '' ? $entry['_currency_code'] : 'EUR';
                         $currencyDisplay = $entry['_currency_code'] !== '' ? $entry['_currency_code'] : 'EUR';
                         $currencyClass = $entry['_currency_code'] !== '' ? '' : 'currency-missing';
@@ -695,8 +734,8 @@ $baseQueryParams = [
                             <td data-label="Bkst nr">
                                 <?= htmlspecialchars((string) ($entry['Document_No'] ?? $entry['Entry_No'] ?? '')) ?>
                             </td>
-                            <td data-label="Datum gemaakt"><?= htmlspecialchars((string) $dateMade) ?></td>
-                            <td data-label="Datum verval" class="due-date-cell"><?= htmlspecialchars((string) $dateDue) ?></td>
+                            <td data-label="Datum gemaakt"><?= htmlspecialchars($dateMadeDisplay) ?></td>
+                            <td data-label="Datum verval" class="due-date-cell"><?= htmlspecialchars($dateDueDisplay) ?></td>
                             <td data-label="Verschuldigd" class="amount" title="<?= htmlspecialchars($lcyTitle) ?>">
                                 <?= htmlspecialchars(format_amount_with_currency($entry['_amount'], $currencyCode)) ?>
                             </td>
