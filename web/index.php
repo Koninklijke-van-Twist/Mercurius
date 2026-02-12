@@ -608,6 +608,7 @@ $baseQueryParams = [
             </label>
             <label>
                 <input type="date" id="dueBeforeInput" name="due_before" value="<?= htmlspecialchars($dueBeforeRaw) ?>"
+                    max="<?= htmlspecialchars($today->format('Y-m-d')) ?>"
                     title="Toon posten met vervaldatum voor deze datum" />
             </label>
             <label>
