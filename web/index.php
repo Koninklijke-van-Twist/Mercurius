@@ -26,6 +26,12 @@ if (!in_array($openFilter, ['open', 'closed', 'both'], true)) {
     $openFilter = 'open';
 }
 
+$dueBeforeRaw = trim((string) ($_GET['due_before'] ?? ''));
+$dueBeforeDate = null;
+if ($dueBeforeRaw !== '') {
+    $dueBeforeDate = DateTime::createFromFormat('Y-m-d', $dueBeforeRaw) ?: null;
+}
+
 function odata_company_url(string $environment, string $company, string $entity, array $params = []): string
 {
     global $baseUrl;
@@ -157,11 +163,23 @@ foreach ($customers as $customer) {
     $customerIndex[(string) $customer['No']] = $customer;
 }
 
+$selectedCustomerNo = trim((string) ($_GET['customer_no'] ?? ''));
+if ($selectedCustomerNo !== '' && !isset($customerIndex[$selectedCustomerNo])) {
+    $selectedCustomerNo = '';
+}
+
+$customerOptions = array_keys($customerIndex);
+sort($customerOptions, SORT_NATURAL);
+
 $today = new DateTime('today');
 $groups = [];
 
 foreach ($entries as $entry) {
     if (!isset($entry['Customer_No'])) {
+        continue;
+    }
+
+    if ($selectedCustomerNo !== '' && (string) $entry['Customer_No'] !== $selectedCustomerNo) {
         continue;
     }
 
@@ -176,6 +194,12 @@ foreach ($entries as $entry) {
         $dueDate = new DateTime($entry['Due_Date']);
         if ($dueDate < $today) {
             $daysOverdue = (int) $dueDate->diff($today)->format('%a');
+        }
+    }
+
+    if ($dueBeforeDate !== null) {
+        if ($dueDate === null || $dueDate >= $dueBeforeDate) {
+            continue;
         }
     }
 
@@ -261,6 +285,7 @@ ksort($groups);
             --muted: #5a6a70;
             --line: #d6d0c8;
             --accent: #254f6e;
+            --highlight: #ffe2a6;
             --overdue: #f6d8d8;
             --negative: #dff2e2;
             --panel: #ffffff;
@@ -291,6 +316,28 @@ ksort($groups);
             margin: 0;
             font-size: 28px;
             letter-spacing: 0.4px;
+        }
+
+        .company-name,
+        .customer-no,
+        .due-date-cell,
+        .due-date-head {
+            transition: background 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .company-name,
+        .customer-no {
+            padding: 0 4px;
+            border-radius: 4px;
+            display: inline-block;
+        }
+
+        .highlight-company .company-name,
+        .highlight-customers .customer-no,
+        .highlight-due-date .due-date-cell,
+        .highlight-due-date .due-date-head {
+            background: var(--highlight);
+            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
         }
 
         .controls {
@@ -466,17 +513,33 @@ ksort($groups);
 
 <body>
     <header>
-        <h1>Openstaande posten debiteuren - <?= $selectedCompany ?></h1>
+        <h1>Openstaande posten debiteuren - <span class="company-name"><?= $selectedCompany ?></span></h1>
+        <label>
+            <select id="companySelect" name="company">
+                <?php foreach ($companies as $company): ?>
+                    <option value="<?= htmlspecialchars($company) ?>" <?= $company === $selectedCompany ? 'selected' : '' ?>>
+                        <?= htmlspecialchars($company) ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+        </label>
         <form class="controls" method="get">
             <label>
-                <select name="company">
-                    <?php foreach ($companies as $company): ?>
-                        <option value="<?= htmlspecialchars($company) ?>" <?= $company === $selectedCompany ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($company) ?>
+                <input type="date" id="dueBeforeInput" name="due_before" value="<?= htmlspecialchars($dueBeforeRaw) ?>"
+                    title="Toon posten met vervaldatum voor deze datum" />
+            </label>
+            <label>
+                <select id="customerSelect" name="customer_no">
+                    <option value="">Alle debiteuren</option>
+                    <?php foreach ($customerOptions as $customerNo): ?>
+                        <?php $customerName = (string) ($customerIndex[$customerNo]['Name'] ?? ''); ?>
+                        <option value="<?= htmlspecialchars($customerNo) ?>" <?= $customerNo === $selectedCustomerNo ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($customerNo . ($customerName !== '' ? ' - ' . $customerName : '')) ?>
                         </option>
                     <?php endforeach; ?>
                 </select>
             </label>
+            
             <label>
                 <input type="text" name="search" value="<?= htmlspecialchars($search) ?>"
                     placeholder="Zoek in alle tekst" />
@@ -511,7 +574,7 @@ ksort($groups);
         <section class="group">
             <hr>
             <div class="customer-header">
-                <div>Debiteur: <?= htmlspecialchars((string) ($customer['No'] ?? '')) ?></div>
+                <div>Debiteur: <span class="customer-no"><?= htmlspecialchars((string) ($customer['No'] ?? '')) ?></span></div>
                 <div><?= htmlspecialchars((string) ($customer['Name'] ?? '')) ?></div>
                 <div><span>Woonplaats:</span> <?= htmlspecialchars((string) ($customer['City'] ?? '')) ?></div>
                 <div>
@@ -528,7 +591,7 @@ ksort($groups);
                     <tr>
                         <th>Bkst nr</th>
                         <th>Datum gemaakt</th>
-                        <th>Datum verval</th>
+                        <th class="due-date-head">Datum verval</th>
                         <th class="amount">Verschuldigd</th>
                         <th>Valuta</th>
                         <th>Dagen vervallen</th>
@@ -571,7 +634,7 @@ ksort($groups);
                                 <?= htmlspecialchars((string) ($entry['Document_No'] ?? $entry['Entry_No'] ?? '')) ?>
                             </td>
                             <td data-label="Datum gemaakt"><?= htmlspecialchars((string) $dateMade) ?></td>
-                            <td data-label="Datum verval"><?= htmlspecialchars((string) $dateDue) ?></td>
+                            <td data-label="Datum verval" class="due-date-cell"><?= htmlspecialchars((string) $dateDue) ?></td>
                             <td data-label="Verschuldigd" class="amount" title="<?= htmlspecialchars($lcyTitle) ?>">
                                 <?= htmlspecialchars(format_amount_with_currency($entry['_amount'], $currencyCode)) ?>
                             </td>
@@ -588,7 +651,7 @@ ksort($groups);
                         </tr>
                     <?php endforeach; ?>
                     <tr class="total-row">
-                        <td colspan="3">Totaal voor debiteur <?= htmlspecialchars((string) ($customer['No'] ?? '')) ?></td>
+                        <td colspan="3">Totaal voor debiteur <span class="customer-no"><?= htmlspecialchars((string) ($customer['No'] ?? '')) ?></span></td>
                         <?php
                         $totalParts = [];
                         foreach ($group['totals_by_currency'] as $code => $totalAmount) {
@@ -605,5 +668,30 @@ ksort($groups);
     <?php endforeach; ?>
 
 </body>
+
+<script>
+    (function () {
+        const body = document.body;
+        const companySelect = document.getElementById('companySelect');
+        const customerSelect = document.getElementById('customerSelect');
+        const dueBeforeInput = document.getElementById('dueBeforeInput');
+
+        function addHoverClass(element, className) {
+            if (!element) {
+                return;
+            }
+            const addClass = () => body.classList.add(className);
+            const removeClass = () => body.classList.remove(className);
+            element.addEventListener('mouseenter', addClass);
+            element.addEventListener('mouseleave', removeClass);
+            element.addEventListener('focus', addClass);
+            element.addEventListener('blur', removeClass);
+        }
+
+        addHoverClass(companySelect, 'highlight-company');
+        addHoverClass(customerSelect, 'highlight-customers');
+        addHoverClass(dueBeforeInput, 'highlight-due-date');
+    })();
+</script>
 
 </html>
