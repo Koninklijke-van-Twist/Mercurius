@@ -164,12 +164,12 @@ foreach ($customers as $customer) {
 }
 
 $selectedCustomerNo = trim((string) ($_GET['customer_no'] ?? ''));
-if ($selectedCustomerNo !== '' && !isset($customerIndex[$selectedCustomerNo])) {
-    $selectedCustomerNo = '';
-}
-
 $customerOptions = array_keys($customerIndex);
 sort($customerOptions, SORT_NATURAL);
+if ($selectedCustomerNo !== '' && !in_array($selectedCustomerNo, $customerOptions, true)) {
+    $customerIndex[$selectedCustomerNo] = ['No' => $selectedCustomerNo, 'Name' => ''];
+    array_unshift($customerOptions, $selectedCustomerNo);
+}
 
 $today = new DateTime('today');
 $groups = [];
@@ -265,6 +265,14 @@ foreach ($entries as $entry) {
 }
 
 ksort($groups);
+
+$baseQueryParams = [
+    'company' => $selectedCompany,
+    'filter' => $filter,
+    'search' => $search,
+    'open_filter' => $openFilter,
+    'due_before' => $dueBeforeRaw,
+];
 
 ?><!doctype html>
 <html lang="nl">
@@ -514,16 +522,16 @@ ksort($groups);
 <body>
     <header>
         <h1>Openstaande posten debiteuren - <span class="company-name"><?= $selectedCompany ?></span></h1>
-        <label>
-            <select id="companySelect" name="company">
-                <?php foreach ($companies as $company): ?>
-                    <option value="<?= htmlspecialchars($company) ?>" <?= $company === $selectedCompany ? 'selected' : '' ?>>
-                        <?= htmlspecialchars($company) ?>
-                    </option>
-                <?php endforeach; ?>
-            </select>
-        </label>
         <form class="controls" method="get">
+            <label>
+                <select id="companySelect" name="company">
+                    <?php foreach ($companies as $company): ?>
+                        <option value="<?= htmlspecialchars($company) ?>" <?= $company === $selectedCompany ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($company) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
             <label>
                 <input type="date" id="dueBeforeInput" name="due_before" value="<?= htmlspecialchars($dueBeforeRaw) ?>"
                     title="Toon posten met vervaldatum voor deze datum" />
@@ -568,13 +576,16 @@ ksort($groups);
     <?php foreach ($groups as $group): ?>
         <?php
         $customer = $group['customer'];
+        $customerNoValue = (string) ($customer['No'] ?? '');
+        $customerFilterParams = array_merge($baseQueryParams, ['customer_no' => $customerNoValue]);
+        $customerLink = '?' . http_build_query($customerFilterParams, '', '&', PHP_QUERY_RFC3986);
         $phone = trim((string) ($customer['Phone_No'] ?? ''));
         $phoneLink = $phone !== '' ? 'tel:' . preg_replace('/[^0-9+]/', '', $phone) : '';
         ?>
         <section class="group">
             <hr>
             <div class="customer-header">
-                <div>Debiteur: <span class="customer-no"><?= htmlspecialchars((string) ($customer['No'] ?? '')) ?></span></div>
+                <div>Debiteur: <a class="customer-no" href="<?= htmlspecialchars($customerLink) ?>"><?= htmlspecialchars($customerNoValue) ?></a></div>
                 <div><?= htmlspecialchars((string) ($customer['Name'] ?? '')) ?></div>
                 <div><span>Woonplaats:</span> <?= htmlspecialchars((string) ($customer['City'] ?? '')) ?></div>
                 <div>
