@@ -175,11 +175,17 @@ $entriesParams = [
         'Remaining_Amt_LCY',
         'Remaining_Amount',
         'Due_Date',
+        'Closed_at_Date',
         'External_Document_No',
         'Your_Reference',
+        'Open'
         //'KVT_Extended_Text',
     ]),
 ];
+
+if (!empty($entriesFilterParts)) {
+    $entriesParams['$filter'] = implode(' and ', $entriesFilterParts);
+}
 
 $entriesUrl = odata_company_url(
     $environment,
@@ -225,12 +231,20 @@ foreach ($entries as $entry) {
         continue;
     }
 
+    $closedDate = null;
+    if (!$entry['Open'] && isset($entry['Closed_at_Date'])) {
+        $closedDate = new DateTime($entry['Closed_at_Date']);
+    }
+
     $dueDate = null;
     $daysOverdue = 0;
     if (!empty($entry['Due_Date'])) {
         $dueDate = new DateTime($entry['Due_Date']);
-        if ($dueDate < $today) {
-            $daysOverdue = (int) $dueDate->diff($today)->format('%a');
+
+        $dateToCheck = $closedDate ?? $today;
+
+        if ($dueDate < $dateToCheck) {
+            $daysOverdue = (int) $dueDate->diff($dateToCheck)->format('%a');
         }
     }
 
@@ -292,6 +306,7 @@ foreach ($entries as $entry) {
     $entry['_amount_lcy'] = isset($entry['Remaining_Amt_LCY']) ? (float) $entry['Remaining_Amt_LCY'] : null;
     $entry['_days_overdue'] = $daysOverdue;
     $entry['_due_date'] = $dueDate;
+    $entry['_closed_at_date'] = $closedDate;
     $entry['_currency_code'] = (string) ($entry['Currency_Code'] ?? '');
 
     $groups[$customerNo]['entries'][] = $entry;
@@ -678,7 +693,7 @@ $baseQueryParams = [
     <?php if (empty($groups)): ?>
         <div class="group">
             <hr>
-            <div class="empty">Geen openstaande posten gevonden voor deze selectie.</div>
+            <div class="empty">Geen posten gevonden voor deze selectie.</div>
         </div>
     <?php endif; ?>
 
@@ -725,6 +740,7 @@ $baseQueryParams = [
                         <th>Bkst nr</th>
                         <th>Aangemaakt</th>
                         <th class="due-date-head">Vervalt</th>
+                        <th class="closed-date-head">Betaald</th>
                         <th class="amount">Verschuldigd</th>
                         <th title="Aantal dagen dat deze post vervallen is.">Dagen</th>
                         <th>Omschrijving</th>
@@ -743,8 +759,10 @@ $baseQueryParams = [
                         }
                         $dateMade = $entry['Document_Date'] ?? $entry['Posting_Date'] ?? '';
                         $dateDue = $entry['Due_Date'] ?? '';
+                        $dateClosed = $entry['Closed_at_Date'] ?? '';
                         $dateMadeDisplay = format_date_nl($dateMade);
                         $dateDueDisplay = format_date_nl($dateDue);
+                        $dateClosedDisplay = format_date_nl($dateClosed);
                         $currencyCode = $entry['_currency_code'] !== '' ? $entry['_currency_code'] : 'EUR';
                         $currencyDisplay = $entry['_currency_code'] !== '' ? $entry['_currency_code'] : 'EUR';
                         $currencyClass = $entry['_currency_code'] !== '' ? '' : 'currency-missing';
@@ -769,6 +787,9 @@ $baseQueryParams = [
                             </td>
                             <td data-label="Datum gemaakt"><?= htmlspecialchars($dateMadeDisplay) ?></td>
                             <td data-label="Datum verval" class="due-date-cell"><?= htmlspecialchars($dateDueDisplay) ?></td>
+                            <td data-label="Datum betaald" class="closed-date-cell">
+                                <?= $entry['Open'] ? 'Open' : htmlspecialchars($dateClosedDisplay) ?>
+                            </td>
                             <td data-label="Verschuldigd" class="amount" title="<?= htmlspecialchars($lcyTitle) ?>">
                                 <?= htmlspecialchars(format_amount_with_currency($entry['_amount'], $currencyCode)) ?>
                             </td>
