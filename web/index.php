@@ -296,6 +296,7 @@ $baseQueryParams = [
             --line: #d6d0c8;
             --accent: #254f6e;
             --highlight: #ffe2a6;
+            --danger: #e15555;
             --overdue: #f6d8d8;
             --negative: #dff2e2;
             --panel: #ffffff;
@@ -382,6 +383,41 @@ $baseQueryParams = [
             border-color: var(--accent);
             color: var(--accent);
             font-weight: 600;
+        }
+
+        .is-disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
+        .is-disabled:hover {
+            transform: none;
+            box-shadow: none;
+        }
+
+        .due-before-warning {
+            border-color: var(--danger);
+            box-shadow: 0 0 0 2px rgba(225, 85, 85, 0.2);
+        }
+
+        .shake {
+            animation: shake 0.3s ease;
+        }
+
+        @keyframes shake {
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+            25% {
+                transform: translateX(-3px);
+            }
+            50% {
+                transform: translateX(3px);
+            }
+            75% {
+                transform: translateX(-2px);
+            }
         }
 
         .group {
@@ -561,7 +597,7 @@ $baseQueryParams = [
                     <option value="both" <?= $openFilter === 'both' ? 'selected' : '' ?>>Beide</option>
                 </select>
             </label>
-            <button type="submit" name="filter" value="all" class="<?= $filter === 'all' ? 'filter-active' : '' ?>">Alle
+            <button id="filterAllButton" type="submit" name="filter" value="all" class="<?= $filter === 'all' ? 'filter-active' : '' ?>">Alle
                 posten</button>
             <button type="submit" name="filter" value="overdue"
                 class="<?= $filter === 'overdue' ? 'filter-active' : '' ?>">Vervallen posten</button>
@@ -703,6 +739,7 @@ $baseQueryParams = [
         const companySelect = document.getElementById('companySelect');
         const customerSelect = document.getElementById('customerSelect');
         const dueBeforeInput = document.getElementById('dueBeforeInput');
+        const filterAllButton = document.getElementById('filterAllButton');
 
         function addHoverClass (element, className)
         {
@@ -721,6 +758,81 @@ $baseQueryParams = [
         addHoverClass(companySelect, 'highlight-company');
         addHoverClass(customerSelect, 'highlight-customers');
         addHoverClass(dueBeforeInput, 'highlight-due-date');
+
+        function isDueBeforeActive ()
+        {
+            return !!(dueBeforeInput && dueBeforeInput.value.trim() !== '');
+        }
+
+        function updateAllButtonState ()
+        {
+            if (!filterAllButton)
+            {
+                return;
+            }
+            const isBlocked = isDueBeforeActive();
+            filterAllButton.classList.toggle('is-disabled', isBlocked);
+            filterAllButton.setAttribute('aria-disabled', isBlocked ? 'true' : 'false');
+        }
+
+        function setWarningState (active)
+        {
+            if (!dueBeforeInput)
+            {
+                return;
+            }
+            dueBeforeInput.classList.toggle('due-before-warning', active);
+        }
+
+        function triggerShake ()
+        {
+            if (!dueBeforeInput)
+            {
+                return;
+            }
+            dueBeforeInput.classList.remove('shake');
+            void dueBeforeInput.offsetWidth;
+            dueBeforeInput.classList.add('shake');
+        }
+
+        if (dueBeforeInput)
+        {
+            dueBeforeInput.addEventListener('input', () =>
+            {
+                updateAllButtonState();
+            });
+        }
+
+        if (filterAllButton)
+        {
+            filterAllButton.addEventListener('mouseenter', () =>
+            {
+                if (isDueBeforeActive())
+                {
+                    setWarningState(true);
+                }
+            });
+            filterAllButton.addEventListener('mouseleave', () =>
+            {
+                setWarningState(false);
+            });
+            filterAllButton.addEventListener('click', (event) =>
+            {
+                if (!isDueBeforeActive())
+                {
+                    return;
+                }
+                event.preventDefault();
+                setWarningState(true);
+                triggerShake();
+                if (dueBeforeInput)
+                {
+                    dueBeforeInput.focus();
+                }
+            });
+        }
+
+        updateAllButtonState();
     })();
 </script>
 
