@@ -107,7 +107,7 @@ function format_amount_with_currency(float $amount, string $currencyCode): strin
     return $symbol . ' ' . $formatted;
 }
 
-function format_date_nl(?string $dateValue): string
+function format_date_nl(?string $dateValue, bool $short = true): string
 {
     if ($dateValue === null || trim($dateValue) === '') {
         return '';
@@ -117,6 +117,10 @@ function format_date_nl(?string $dateValue): string
         $date = new DateTime($dateValue);
     } catch (Exception $exception) {
         return $dateValue;
+    }
+
+    if ($short) {
+        return $date->format('d-m-Y');
     }
 
     $months = [
@@ -204,7 +208,7 @@ if ($selectedCustomerNo !== '' && !in_array($selectedCustomerNo, $customerOption
 }
 
 $today = new DateTime('today');
-$todayFormatted = format_date_nl($today->format('Y-m-d'));
+$todayFormatted = format_date_nl($today->format('Y-m-d'), false);
 $groups = [];
 
 foreach ($entries as $entry) {
@@ -354,6 +358,12 @@ $baseQueryParams = [
             justify-content: space-between;
             gap: 16px;
             margin-bottom: 24px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            background: var(--bg);
+            padding: 12px 0;
+            border-bottom: 1px solid var(--line);
         }
 
         h1 {
@@ -559,6 +569,17 @@ $baseQueryParams = [
             .print-date {
                 display: block !important;
             }
+
+            .group {
+                break-inside: avoid-page;
+                page-break-inside: avoid;
+            }
+
+            .customer-header,
+            thead {
+                break-after: avoid-page;
+                page-break-after: avoid;
+            }
         }
 
         @media (max-width: 900px) {
@@ -702,13 +723,12 @@ $baseQueryParams = [
                 <thead>
                     <tr>
                         <th>Bkst nr</th>
-                        <th>Datum gemaakt</th>
-                        <th class="due-date-head">Datum verval</th>
+                        <th>Aangemaakt</th>
+                        <th class="due-date-head">Vervalt</th>
                         <th class="amount">Verschuldigd</th>
-                        <th>Valuta</th>
-                        <th>Dagen vervallen</th>
+                        <th title="Aantal dagen dat deze post vervallen is.">Dagen</th>
                         <th>Omschrijving</th>
-                        <th>Verk./afd./prj.</th>
+                        <th title="Verkoper, afdeling of project die deze verkoop gemaakt heeft.">Afd.</th>
                         <th>Notities</th>
                     </tr>
                 </thead>
@@ -751,10 +771,6 @@ $baseQueryParams = [
                             <td data-label="Datum verval" class="due-date-cell"><?= htmlspecialchars($dateDueDisplay) ?></td>
                             <td data-label="Verschuldigd" class="amount" title="<?= htmlspecialchars($lcyTitle) ?>">
                                 <?= htmlspecialchars(format_amount_with_currency($entry['_amount'], $currencyCode)) ?>
-                            </td>
-                            <td data-label="Valuta" class="<?= $currencyClass ?>"
-                                title="<?= htmlspecialchars($currencyTitle) ?>">
-                                <?= htmlspecialchars((string) $currencyDisplay) ?>
                             </td>
                             <td data-label="Dagen vervallen">
                                 <?= $entry['_days_overdue'] > 0 ? (int) $entry['_days_overdue'] : '' ?>
