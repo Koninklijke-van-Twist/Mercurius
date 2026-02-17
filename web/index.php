@@ -153,7 +153,13 @@ function preserve_memo_whitespace(string $text): string
     return str_replace(' ', '&nbsp;', $text);
 }
 
-function render_memo_text_segment(string $segment, array $memoTooltipTerms, ?string $termPattern): string
+function customer_filter_href(array $baseQueryParams, string $customerNo): string
+{
+    $params = array_merge($baseQueryParams, ['customer_no' => $customerNo]);
+    return '?' . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
+}
+
+function render_memo_terms(string $segment, array $memoTooltipTerms, ?string $termPattern): string
 {
     if ($segment === '') {
         return '';
@@ -195,6 +201,49 @@ function render_memo_text_segment(string $segment, array $memoTooltipTerms, ?str
     return $rendered;
 }
 
+function render_memo_text_segment(string $segment, array $memoTooltipTerms, ?string $termPattern, array $baseQueryParams): string
+{
+    if ($segment === '') {
+        return '';
+    }
+
+    $debtorPattern = '~\b(debiteur|deb\.?|debnr|deb[-\s]*nr|debiteurnr|debiteur[-\s]*nr|debiteurnummer|deb[-\s]*nummer)(\s*[:#-]?\s*)(\d{2,10})\b~iu';
+    if (preg_match($debtorPattern, $segment) !== 1) {
+        return render_memo_terms($segment, $memoTooltipTerms, $termPattern);
+    }
+
+    $rendered = '';
+    $offset = 0;
+    if (preg_match_all($debtorPattern, $segment, $matches, PREG_OFFSET_CAPTURE)) {
+        foreach ($matches[0] as $index => $fullMatchData) {
+            $fullMatch = (string) $fullMatchData[0];
+            $position = (int) $fullMatchData[1];
+            $prefix = (string) ($matches[1][$index][0] ?? '');
+            $separator = (string) ($matches[2][$index][0] ?? '');
+            $customerNo = (string) ($matches[3][$index][0] ?? '');
+
+            if ($position > $offset) {
+                $plainText = substr($segment, $offset, $position - $offset);
+                $rendered .= render_memo_terms($plainText, $memoTooltipTerms, $termPattern);
+            }
+
+            $rendered .= render_memo_terms($prefix . $separator, $memoTooltipTerms, $termPattern);
+            $href = customer_filter_href($baseQueryParams, $customerNo);
+            $numberDisplay = preserve_memo_whitespace(htmlspecialchars($customerNo));
+            $rendered .= '<a href="' . htmlspecialchars($href) . '">' . $numberDisplay . '</a>';
+
+            $offset = $position + strlen($fullMatch);
+        }
+    }
+
+    if ($offset < strlen($segment)) {
+        $plainText = substr($segment, $offset);
+        $rendered .= render_memo_terms($plainText, $memoTooltipTerms, $termPattern);
+    }
+
+    return $rendered;
+}
+
 function is_probable_phone(string $text): bool
 {
     $trimmed = trim($text);
@@ -228,7 +277,7 @@ function phone_href(string $text): string
     return 'tel:' . ($hasLeadingPlus ? '+' : '') . $digits;
 }
 
-function format_memo_html(string $memo, array $memoTooltipTerms): string
+function format_memo_html(string $memo, array $memoTooltipTerms, array $baseQueryParams): string
 {
     $normalized = str_replace(["\\r\\n", "\\n", "\\r"], "\n", $memo);
     $normalized = str_replace(["\r\n", "\r"], "\n", $normalized);
@@ -256,7 +305,7 @@ function format_memo_html(string $memo, array $memoTooltipTerms): string
 
                 if ($matchPos > $offset) {
                     $segment = substr($line, $offset, $matchPos - $offset);
-                    $renderedLine .= render_memo_text_segment($segment, $memoTooltipTerms, $termPattern);
+                    $renderedLine .= render_memo_text_segment($segment, $memoTooltipTerms, $termPattern, $baseQueryParams);
                 }
 
                 if (strpos($matchText, '@') !== false && strpos($matchText, '://') === false && stripos($matchText, 'www.') !== 0) {
@@ -272,7 +321,7 @@ function format_memo_html(string $memo, array $memoTooltipTerms): string
                     $display = preserve_memo_whitespace(htmlspecialchars($matchText));
                     $renderedLine .= '<a href="' . htmlspecialchars($href) . '">' . $display . '</a>';
                 } else {
-                    $renderedLine .= render_memo_text_segment($matchText, $memoTooltipTerms, $termPattern);
+                    $renderedLine .= render_memo_text_segment($matchText, $memoTooltipTerms, $termPattern, $baseQueryParams);
                 }
 
                 $offset = $matchPos + strlen($matchText);
@@ -281,7 +330,7 @@ function format_memo_html(string $memo, array $memoTooltipTerms): string
 
         if ($offset < strlen($line)) {
             $segment = substr($line, $offset);
-            $renderedLine .= render_memo_text_segment($segment, $memoTooltipTerms, $termPattern);
+            $renderedLine .= render_memo_text_segment($segment, $memoTooltipTerms, $termPattern, $baseQueryParams);
         }
 
         if ($renderedLine === '') {
@@ -950,7 +999,7 @@ $baseQueryParams = [
                         ]);
                         $dimensionText = $dimensionParts ? implode(' / ', $dimensionParts) : '';
                         $notes = (string) ($entry['KVT_Memo'] ?? '');
-                        $notesDisplay = format_memo_html($notes, $memoTooltipTerms);
+                        $notesDisplay = format_memo_html($notes, $memoTooltipTerms, $baseQueryParams);
                         ?>
                         <tr class="<?= $rowClass ?>">
                             <td data-label="Bkst nr">
