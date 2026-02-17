@@ -780,6 +780,8 @@ $baseQueryParams = [
                         ]);
                         $dimensionText = $dimensionParts ? implode(' / ', $dimensionParts) : '';
                         $notes = (string) ($entry['KVT_Memo'] ?? '');
+                        $notesEscaped = htmlspecialchars(str_replace(["\\r\\n", "\\n", "\\r"], "\n", $notes));
+                        $notesDisplay = str_replace(["\r\n", "\r", "\n"], '<br/>', $notesEscaped);
                         ?>
                         <tr class="<?= $rowClass ?>">
                             <td data-label="Bkst nr">
@@ -798,7 +800,7 @@ $baseQueryParams = [
                             </td>
                             <td data-label="Omschrijving"><?= htmlspecialchars((string) ($entry['Description'] ?? '')) ?></td>
                             <td data-label="Verkoper/afdeling/project"><?= htmlspecialchars($dimensionText) ?></td>
-                            <td data-label="Notities"><?= htmlspecialchars($notes) ?></td>
+                            <td data-label="Notities"><?= $notesDisplay ?></td>
                         </tr>
                     <?php endforeach; ?>
                     <tr class="total-row">
