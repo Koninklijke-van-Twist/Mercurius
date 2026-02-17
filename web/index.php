@@ -1008,7 +1008,7 @@ $baseQueryParams = [
                             <td data-label="Datum gemaakt"><?= htmlspecialchars($dateMadeDisplay) ?></td>
                             <td data-label="Datum verval" class="due-date-cell"><?= htmlspecialchars($dateDueDisplay) ?></td>
                             <td data-label="Datum betaald" class="closed-date-cell">
-                                <?= $entry['Open'] ? 'Open' : htmlspecialchars($dateClosedDisplay) ?>
+                                <?= $entry['Open'] ? 'Te betalen' : htmlspecialchars($dateClosedDisplay) ?>
                             </td>
                             <td data-label="Verschuldigd" class="amount" title="<?= htmlspecialchars($lcyTitle) ?>">
                                 <?= htmlspecialchars(format_amount_with_currency($entry['_amount'], $currencyCode)) ?>
@@ -1022,7 +1022,7 @@ $baseQueryParams = [
                         </tr>
                     <?php endforeach; ?>
                     <tr class="total-row">
-                        <td colspan="3">Totaal voor debiteur <span
+                        <td colspan="4">Totaal voor debiteur <span
                                 class="customer-no"><?= htmlspecialchars((string) ($customer['No'] ?? '')) ?></span></td>
                         <?php
                         $totalParts = [];
