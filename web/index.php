@@ -178,8 +178,8 @@ $entriesParams = [
         'Closed_at_Date',
         'External_Document_No',
         'Your_Reference',
-        'Open'
-        //'KVT_Extended_Text',
+        'Open',
+        'KVT_Memo',
     ]),
 ];
 
@@ -273,7 +273,7 @@ foreach ($entries as $entry) {
             (string) ($entry['Currency_Code'] ?? ''),
             (string) ($entry['External_Document_No'] ?? ''),
             (string) ($entry['Your_Reference'] ?? ''),
-            //(string) ($entry['KVT_Extended_Text'] ?? ''),
+            (string) ($entry['KVT_Memo'] ?? ''),
             (string) ($customerInfo['No'] ?? ''),
             (string) ($customerInfo['Name'] ?? ''),
             (string) ($customerInfo['City'] ?? ''),
@@ -779,7 +779,7 @@ $baseQueryParams = [
                             (string) ($entry['Global_Dimension_2_Code'] ?? ''),
                         ]);
                         $dimensionText = $dimensionParts ? implode(' / ', $dimensionParts) : '';
-                        $notes = "notes";//(string) ($entry['KVT_Extended_Text'] ?? '');
+                        $notes = (string) ($entry['KVT_Memo'] ?? '');
                         ?>
                         <tr class="<?= $rowClass ?>">
                             <td data-label="Bkst nr">
