@@ -241,6 +241,14 @@ foreach ($mailList as $recipient => $company) {
 
     try {
         $html = fetch_report_html($company);
+        // Vervang alle <a>...</a> door alleen de tekstinhoud
+        $html = preg_replace_callback(
+            '/<a\b[^>]*>(.*?)<\/a>/is',
+            function ($m) {
+                return isset($m[1]) ? strip_tags($m[1]) : '';
+            },
+            $html
+        );
         $subject = $subjectPrefix . ' - ' . $company . ' - ' . $dateText;
         send_html_mail($reportMail, $recipient, $subject, $html);
         $ok++;
