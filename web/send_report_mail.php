@@ -90,10 +90,11 @@ function fetch_report_html(string $company): string
         throw new RuntimeException('index.php niet gevonden');
     }
     // Simuleer GET-parameter en mailmodus
-    $_GET['company'] = $company;
     $isMailReport = true;
-    $html = (function () use ($indexFile) {
+    $html = (function () use ($indexFile, $company) {
         ob_start();
+        $_GET['company'] = $company;
+        $_GET['printfriendly'] = 'true';
         include $indexFile;
         return ob_get_clean();
     })();

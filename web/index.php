@@ -452,11 +452,11 @@ if (isset($isMailReport) && $isMailReport) {
         }
 
         col.col-aangemaakt {
-            width: 60px;
+            width: 67px;
         }
 
         col.col-vervalt {
-            width: 60px;
+            width: 67px;
         }
 
         col.col-verschuldigd {
@@ -543,7 +543,10 @@ if (isset($isMailReport) && $isMailReport) {
             color: var(--muted);
         }
 
-        @media print {
+        <?php if ($isMailReport): ?>
+            @media print {
+
+            <?php endif ?>
             @page {
                 margin: 10mm;
             }
@@ -610,9 +613,11 @@ if (isset($isMailReport) && $isMailReport) {
                 break-after: avoid-page;
                 page-break-after: avoid;
             }
-        }
 
-        @media (max-width: 900px) {
+            <?php if ($isMailReport): ?>
+            }
+
+        <?php endif ?> @media (max-width: 900px) {
             body {
                 padding: 24px 14px 50px;
             }
@@ -727,25 +732,25 @@ if (isset($isMailReport) && $isMailReport) {
             <hr>
             <div class="customer-header">
                 <div>Debiteur: <a class="customer-no"
-                        href="<?= htmlspecialchars($customerLink) ?>"><?= htmlspecialchars($customerNoValue) ?></a></div>
-                <div><?= htmlspecialchars((string) ($customer['Name'] ?? '')) ?></div>
-                <div><span>Woonplaats:</span> <?= htmlspecialchars((string) ($customer['City'] ?? '')) ?></div>
+                        href="<?= htmlspecialchars($customerLink) ?>"><?= htmlspecialchars($customerNoValue) ?></a>&nbsp;</div>
+                <div><?= htmlspecialchars((string) ($customer['Name'] ?? '')) ?>&nbsp;</div>
+                <div><span>Woonplaats:</span> <?= htmlspecialchars((string) ($customer['City'] ?? '')) ?>&nbsp;</div>
                 <div>
                     <span>Telefoon:</span>
                     <?php if ($phoneLink): ?>
-                        <a href="<?= htmlspecialchars($phoneLink) ?>"><?= htmlspecialchars($phone) ?></a>
+                        <a href="<?= htmlspecialchars($phoneLink) ?>"><?= htmlspecialchars($phone) ?></a>&nbsp;
                     <?php else: ?>
-                        <span class="muted">n.v.t.</span>
+                        <span class="muted">n.v.t.</span>&nbsp;
                     <?php endif; ?>
                 </div>
                 <div>
                     <span>Email:</span>
                     <?php if ($mailLink): ?>
                         <a href="<?= htmlspecialchars($mailLink) ?>">
-                            <?= strtolower(htmlspecialchars($email)) ?>
+                            <?= strtolower(htmlspecialchars($email)) ?>&nbsp;
                         </a>
                     <?php else: ?>
-                        <span class="muted">n.v.t.</span>
+                        <span class="muted">n.v.t.</span>&nbsp;
                     <?php endif; ?>
                 </div>
             </div>
