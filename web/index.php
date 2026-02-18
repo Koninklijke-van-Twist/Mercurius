@@ -119,7 +119,7 @@ function format_amount_with_currency(float $amount, string $currencyCode): strin
     return $symbol . ' ' . $formatted;
 }
 
-function format_date_nl(?string $dateValue, bool $short = true): string
+function format_date_nl(?string $dateValue, bool $short = true, bool $year2 = false): string
 {
     if ($dateValue === null || trim($dateValue) === '') {
         return '';
@@ -132,7 +132,7 @@ function format_date_nl(?string $dateValue, bool $short = true): string
     }
 
     if ($short) {
-        return $date->format('d-m-Y');
+        return $date->format($year2 ? 'd-m-y' : 'd-m-Y');
     }
 
     $months = [
@@ -152,7 +152,7 @@ function format_date_nl(?string $dateValue, bool $short = true): string
 
     $monthIndex = (int) $date->format('n');
     $monthName = $months[$monthIndex] ?? '';
-    return $date->format('j') . ' ' . $monthName . ' ' . $date->format('Y');
+    return $date->format('j') . ' ' . $monthName . ' ' . $date->format($year2 ? 'y' : 'Y');
 }
 
 function preserve_memo_whitespace(string $text): string
@@ -753,7 +753,7 @@ if (isset($isMailReport) && $isMailReport) {
 
         col.col-bkst {
             width: 8%;
-            min-width: 50px;
+            min-width: 90px;
         }
 
         col.col-aangemaakt {
@@ -780,8 +780,8 @@ if (isset($isMailReport) && $isMailReport) {
         }
 
         col.col-afd {
-            width: 3%;
-            min-width: 40px;
+            width: 6%;
+            min-width: 65px;
         }
 
         col.col-notities {
@@ -807,6 +807,13 @@ if (isset($isMailReport) && $isMailReport) {
         }
 
         td[data-label="Notities"] {
+            font-size: 11px;
+            white-space: pre-wrap;
+            overflow-wrap: break-word;
+            word-break: normal;
+        }
+
+        td[data-label="Omschrijving"] {
             font-size: 11px;
             white-space: pre-wrap;
             overflow-wrap: break-word;
@@ -1086,8 +1093,8 @@ if (isset($isMailReport) && $isMailReport) {
                         $dateMade = $entry['Document_Date'] ?? $entry['Posting_Date'] ?? '';
                         $dateDue = $entry['Due_Date'] ?? '';
                         $dateClosed = $entry['Closed_at_Date'] ?? '';
-                        $dateMadeDisplay = format_date_nl($dateMade);
-                        $dateDueDisplay = format_date_nl($dateDue);
+                        $dateMadeDisplay = format_date_nl($dateMade, true, true);
+                        $dateDueDisplay = format_date_nl($dateDue, true, true);
                         $dateClosedDisplay = format_date_nl($dateClosed);
                         $currencyCode = $entry['_currency_code'] !== '' ? $entry['_currency_code'] : 'EUR';
                         $currencyDisplay = $entry['_currency_code'] !== '' ? $entry['_currency_code'] : 'EUR';
