@@ -1,5 +1,7 @@
 <?php
-
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
 require __DIR__ . '/auth.php';
 require_once __DIR__ . '/css_inliner.php';
 
@@ -90,9 +92,11 @@ function fetch_report_html(string $company): string
     // Simuleer GET-parameter en mailmodus
     $_GET['company'] = $company;
     $isMailReport = true;
-    ob_start();
-    include $indexFile;
-    $html = ob_get_clean();
+    $html = (function () use ($indexFile) {
+        ob_start();
+        include $indexFile;
+        return ob_get_clean();
+    })();
     if (!$html || strlen(trim($html)) < 100) {
         throw new RuntimeException('Lege of te korte HTML uit index.php');
     }
