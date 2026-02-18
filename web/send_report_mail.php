@@ -199,6 +199,15 @@ function smtp_send_html_mail(array $reportMail, string $toEmail, string $subject
     }
 }
 
+
+function encode_mimeheader_fallback($str) {
+    if (function_exists('mb_encode_mimeheader')) {
+        return mb_encode_mimeheader($str, 'UTF-8');
+    }
+    // Fallback: base64 encode UTF-8
+    return '=?UTF-8?B?' . base64_encode($str) . '?=';
+}
+
 function send_html_mail(array $reportMail, string $toEmail, string $subject, string $html): void
 {
     $transport = strtolower((string) ($reportMail['transport'] ?? 'mail'));
@@ -216,7 +225,7 @@ function send_html_mail(array $reportMail, string $toEmail, string $subject, str
 
     $encodedSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
     $fromHeader = $fromName !== ''
-        ? 'From: ' . mb_encode_mimeheader($fromName, 'UTF-8') . ' <' . $fromEmail . '>'
+        ? 'From: ' . encode_mimeheader_fallback($fromName) . ' <' . $fromEmail . '>'
         : 'From: <' . $fromEmail . '>';
 
     $headers = [
