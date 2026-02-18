@@ -149,8 +149,7 @@ function format_date_nl(?string $dateValue, bool $short = true): string
 
 function preserve_memo_whitespace(string $text): string
 {
-    $text = str_replace("\t", str_repeat('&nbsp;', 4), $text);
-    return str_replace(' ', '&nbsp;', $text);
+    return str_replace("\t", '    ', $text);
 }
 
 function customer_filter_href(array $baseQueryParams, string $customerNo): string
@@ -734,7 +733,46 @@ $baseQueryParams = [
         table {
             width: 100%;
             border-collapse: collapse;
+            table-layout: fixed;
         }
+
+        col.col-bkst {
+            width: 8%;
+            min-width: 50px;
+        }
+
+        col.col-aangemaakt {
+            width: 10%;
+        }
+
+        col.col-vervalt {
+            width: 10%;
+        }
+
+        col.col-verschuldigd {
+            width: 10%;
+            min-width: 100px;
+        }
+
+        col.col-dagen {
+            width: 6%;
+            min-width: 40px;
+        }
+
+        col.col-omschrijving {
+            width: 13%;
+            min-width: 50px;
+        }
+
+        col.col-afd {
+            width: 3%;
+            min-width: 40px;
+        }
+
+        col.col-notities {
+            width: 40%;
+        }
+
 
         thead th {
             text-align: left;
@@ -742,15 +780,22 @@ $baseQueryParams = [
             text-transform: uppercase;
             letter-spacing: 0.4px;
             color: var(--muted);
-            padding: 12px 16px;
+            padding: 6px 5px;
             border-bottom: 1px solid var(--line);
         }
 
         tbody td {
-            padding: 12px 16px;
+            padding: 3px 5px;
             border-bottom: 1px solid #eee6dd;
             vertical-align: top;
             font-size: 14px;
+        }
+
+        td[data-label="Notities"] {
+            font-size: 11px;
+            white-space: pre-wrap;
+            overflow-wrap: break-word;
+            word-break: normal;
         }
 
         tbody tr.row-overdue {
@@ -786,6 +831,44 @@ $baseQueryParams = [
         }
 
         @media print {
+            @page {
+                margin: 10mm;
+            }
+
+            body {
+                padding: 0 !important;
+                margin: 0 !important;
+                background: #fff !important;
+            }
+
+            header {
+                position: static !important;
+                top: auto !important;
+                z-index: auto !important;
+            }
+
+            table {
+                width: 100% !important;
+                max-width: 100% !important;
+            }
+
+            .group {
+                display: block !important;
+                width: 100% !important;
+                max-width: 100% !important;
+                margin-left: 0 !important;
+                margin-right: 0 !important;
+                box-shadow: none !important;
+            }
+
+            td[data-label="Notities"],
+            td[data-label="Notities"] a,
+            td[data-label="Notities"] .memo-term {
+                white-space: normal !important;
+                overflow-wrap: break-word;
+                word-break: normal;
+            }
+
             .controls {
                 display: none !important;
             }
@@ -954,12 +1037,21 @@ $baseQueryParams = [
                 </div>
             </div>
             <table>
+                <colgroup>
+                    <col class="col-bkst">
+                    <col class="col-aangemaakt">
+                    <col class="col-vervalt">
+                    <col class="col-verschuldigd">
+                    <col class="col-dagen">
+                    <col class="col-omschrijving">
+                    <col class="col-afd">
+                    <col class="col-notities">
+                </colgroup>
                 <thead>
                     <tr>
                         <th>Bkst nr</th>
                         <th>Aangemaakt</th>
                         <th class="due-date-head">Vervalt</th>
-                        <th class="closed-date-head">Betaald</th>
                         <th class="amount">Verschuldigd</th>
                         <th title="Aantal dagen dat deze post vervallen is.">Dagen</th>
                         <th>Omschrijving</th>
@@ -1007,9 +1099,6 @@ $baseQueryParams = [
                             </td>
                             <td data-label="Datum gemaakt"><?= htmlspecialchars($dateMadeDisplay) ?></td>
                             <td data-label="Datum verval" class="due-date-cell"><?= htmlspecialchars($dateDueDisplay) ?></td>
-                            <td data-label="Datum betaald" class="closed-date-cell">
-                                <?= $entry['Open'] ? 'Te betalen' : htmlspecialchars($dateClosedDisplay) ?>
-                            </td>
                             <td data-label="Verschuldigd" class="amount" title="<?= htmlspecialchars($lcyTitle) ?>">
                                 <?= htmlspecialchars(format_amount_with_currency($entry['_amount'], $currencyCode)) ?>
                             </td>
@@ -1022,7 +1111,7 @@ $baseQueryParams = [
                         </tr>
                     <?php endforeach; ?>
                     <tr class="total-row">
-                        <td colspan="4">Totaal voor debiteur <span
+                        <td colspan="3">Totaal voor debiteur <span
                                 class="customer-no"><?= htmlspecialchars((string) ($customer['No'] ?? '')) ?></span></td>
                         <?php
                         $totalParts = [];
