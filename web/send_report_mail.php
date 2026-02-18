@@ -2,7 +2,7 @@
 require __DIR__ . '/auth.php';
 
 $enforceScheduleGuard = true;
-$guardRequireMonday = false;
+$guardRequireMonday = true;
 $guardRequireSingleRunPerDay = true;
 $guardLastSentFile = __DIR__ . '/cache/report-mail-last-sent.txt';
 
