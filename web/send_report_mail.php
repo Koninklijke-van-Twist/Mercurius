@@ -2,7 +2,7 @@
 require __DIR__ . '/auth.php';
 
 $enforceScheduleGuard = true;
-$guardRequireMonday = true;
+$guardRequireMonday = false;
 $guardRequireSingleRunPerDay = true;
 $guardLastSentFile = __DIR__ . '/cache/report-mail-last-sent.txt';
 
@@ -70,52 +70,22 @@ function build_report_url(string $baseUrl, string $company): string
     return $absUrl . $separator . http_build_query(['company' => $company], '', '&', PHP_QUERY_RFC3986);
 }
 
-function fetch_report_html(string $url): string
+function fetch_report_html(string $company): string
 {
-    if (function_exists('curl_init')) {
-        $ch = curl_init($url);
-        if ($ch === false) {
-            throw new RuntimeException('curl_init failed');
-        }
-
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_CONNECTTIMEOUT => 15,
-            CURLOPT_TIMEOUT => 90,
-            CURLOPT_HTTPHEADER => ['Accept: text/html'],
-        ]);
-
-        $response = curl_exec($ch);
-        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $error = curl_error($ch);
-        curl_close($ch);
-
-        if ($response === false) {
-            throw new RuntimeException('Failed to fetch report HTML: ' . $error);
-        }
-        if ($httpCode < 200 || $httpCode >= 300) {
-            throw new RuntimeException('Report URL returned HTTP ' . $httpCode);
-        }
-
-        return (string) $response;
+    $indexFile = __DIR__ . '/index.php';
+    if (!file_exists($indexFile)) {
+        throw new RuntimeException('index.php niet gevonden');
     }
-
-    $context = stream_context_create([
-        'http' => [
-            'method' => 'GET',
-            'timeout' => 90,
-            'header' => "Accept: text/html\r\n",
-            'ignore_errors' => true,
-        ],
-    ]);
-
-    $response = @file_get_contents($url, false, $context);
-    if ($response === false) {
-        throw new RuntimeException('Failed to fetch report HTML with file_get_contents');
+    // Simuleer GET-parameter en mailmodus
+    $_GET['company'] = $company;
+    $isMailReport = true;
+    ob_start();
+    include $indexFile;
+    $html = ob_get_clean();
+    if (!$html || strlen(trim($html)) < 100) {
+        throw new RuntimeException('Lege of te korte HTML uit index.php');
     }
-
-    return $response;
+    return $html;
 }
 
 function smtp_read_response($socket): string
@@ -284,10 +254,8 @@ foreach ($mailList as $recipient => $company) {
         continue;
     }
 
-    $url = build_report_url($reportUrl, $company);
-
     try {
-        $html = fetch_report_html($url);
+        $html = fetch_report_html($company);
         $subject = $subjectPrefix . ' - ' . $company . ' - ' . $dateText;
         send_html_mail($reportMail, $recipient, $subject, $html);
         $ok++;

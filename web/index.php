@@ -527,6 +527,12 @@ $baseQueryParams = [
     'due_before' => $dueBeforeRaw,
 ];
 
+
+if (isset($isMailReport) && $isMailReport) {
+    // Forceer print CSS inline voor mail
+    echo '<style>@media print { body { background: #fff !important; } } body { background: #fff !important; } </style>';
+    echo '<script>window.print = function(){};</script>';
+}
 ?><!doctype html>
 <html lang="nl">
 
