@@ -8,8 +8,8 @@ if ((isset($_GET['printfriendly']) && $_GET['printfriendly'] === 'true') || (iss
 }
 
 require __DIR__ . "/auth.php";
-require __DIR__ . "/logincheck.php";
-require __DIR__ . "/odata.php";
+require_once __DIR__ . "/logincheck.php";
+require_once __DIR__ . "/odata.php";
 
 $companies = [
     "Koninklijke van Twist",
