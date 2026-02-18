@@ -1,5 +1,7 @@
 <?php
+
 require __DIR__ . '/auth.php';
+require_once __DIR__ . '/css_inliner.php';
 
 $enforceScheduleGuard = true;
 $guardRequireMonday = true;
@@ -241,6 +243,8 @@ foreach ($mailList as $recipient => $company) {
 
     try {
         $html = fetch_report_html($company);
+        // Zet alle CSS inline voor mail/PDF (heeft geen effect op index.php)
+        $html = inline_css_from_style_tags($html);
         // Vervang alle <a>...</a> door alleen de tekstinhoud
         $html = preg_replace_callback(
             '/<a\b[^>]*>(.*?)<\/a>/is',
