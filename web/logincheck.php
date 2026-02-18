@@ -1,11 +1,20 @@
 <?php
-function is_localhost(): bool
+
+function is_trusted_requester(): bool
 {
-    $host = $_SERVER['HTTP_HOST'] ?? '';
-    return $host === 'localhost' || str_starts_with($host, 'localhost:');
+    $remote = $_SERVER['REMOTE_ADDR'] ?? '';
+    $server = $_SERVER['SERVER_ADDR'] ?? '';
+    $trusted = ['127.0.0.1', '::1'];
+    if ($remote === $server && $remote !== '') {
+        return true;
+    }
+    if (in_array($remote, $trusted, true)) {
+        return true;
+    }
+    return false;
 }
 
-if (!is_localhost()) {
+if (!is_trusted_requester()) {
     require __DIR__ . "/../login/lib.php";
 
     if (

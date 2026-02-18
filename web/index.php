@@ -1,7 +1,9 @@
 <?php
 
-// Output buffering voor mail/print post-processing
-if (isset($isMailReport) && $isMailReport) {
+
+// Printvriendelijke modus forceren via ?printfriendly=true
+if ((isset($_GET['printfriendly']) && $_GET['printfriendly'] === 'true') || (isset($isMailReport) && $isMailReport)) {
+    $isMailReport = true;
     ob_start();
 }
 
