@@ -717,13 +717,14 @@ if (isset($isMailReport) && $isMailReport) {
         }
 
         .customer-header {
-            padding: 16px 20px;
+            padding: 3px 6px;
             display: flex;
             flex-wrap: wrap;
             gap: 12px 20px;
             font-weight: 600;
             background: #f0ede8;
             align-items: center;
+            font-size: 12px;
         }
 
         .customer-header span {
@@ -752,46 +753,41 @@ if (isset($isMailReport) && $isMailReport) {
         }
 
         col.col-bkst {
-            width: 8%;
-            min-width: 90px;
+            width: 80px;
         }
 
         col.col-aangemaakt {
-            width: 10%;
+            width: 60px;
         }
 
         col.col-vervalt {
-            width: 10%;
+            width: 60px;
         }
 
         col.col-verschuldigd {
-            width: 10%;
-            min-width: 100px;
+            width: 100px;
         }
 
         col.col-dagen {
-            width: 6%;
-            min-width: 40px;
+            width: 40px;
         }
 
         col.col-omschrijving {
-            width: 13%;
-            min-width: 50px;
+            width: 190px;
         }
 
         col.col-afd {
-            width: 6%;
-            min-width: 65px;
+            width: 95px;
         }
 
         col.col-notities {
-            width: 40%;
+            width: 100%;
         }
 
 
         thead th {
             text-align: left;
-            font-size: 12px;
+            font-size: 11px;
             text-transform: uppercase;
             letter-spacing: 0.4px;
             color: var(--muted);
@@ -803,7 +799,7 @@ if (isset($isMailReport) && $isMailReport) {
             padding: 3px 5px;
             border-bottom: 1px solid #eee6dd;
             vertical-align: top;
-            font-size: 14px;
+            font-size: 11px;
         }
 
         td[data-label="Notities"] {
@@ -844,7 +840,7 @@ if (isset($isMailReport) && $isMailReport) {
 
         .muted {
             color: var(--muted);
-            font-size: 12px;
+            font-size: 11px;
         }
 
         .empty {
@@ -1072,12 +1068,12 @@ if (isset($isMailReport) && $isMailReport) {
                 <thead>
                     <tr>
                         <th>Bkst nr</th>
-                        <th>Aangemaakt</th>
+                        <th>Gemaakt</th>
                         <th class="due-date-head">Vervalt</th>
                         <th class="amount">Verschuldigd</th>
-                        <th title="Aantal dagen dat deze post vervallen is.">Dagen</th>
+                        <th title="Aantal dagen dat deze post vervallen is.">Dgn</th>
                         <th>Omschrijving</th>
-                        <th title="Verkoper, afdeling of project die deze verkoop gemaakt heeft.">Afd.</th>
+                        <th title="Verkoper, afdeling of project die deze verkoop gemaakt heeft.">Afdeling</th>
                         <th>Notities</th>
                     </tr>
                 </thead>
@@ -1142,8 +1138,7 @@ if (isset($isMailReport) && $isMailReport) {
                         }
                         $totalText = implode(' / ', $totalParts);
                         ?>
-                        <td class="amount"><?= htmlspecialchars($totalText) ?></td>
-                        <td colspan="5"></td>
+                        <td class="amount" colspan="6" style="text-align:left;"><?= htmlspecialchars($totalText) ?></td>
                     </tr>
                 </tbody>
             </table>
