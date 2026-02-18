@@ -1,0 +1,306 @@
+<?php
+require __DIR__ . '/auth.php';
+
+$enforceScheduleGuard = true;
+$guardRequireMonday = true;
+$guardRequireSingleRunPerDay = true;
+$guardLastSentFile = __DIR__ . '/cache/report-mail-last-sent.txt';
+
+function write_output(string $message, bool $isError = false): void
+{
+    if (PHP_SAPI === 'cli') {
+        $stream = $isError ? STDERR : STDOUT;
+        fwrite($stream, $message . "\n");
+        return;
+    }
+
+    if ($isError) {
+        echo '<div style="color:#b42318;">' . htmlspecialchars($message) . "</div>\n";
+    } else {
+        echo '<div>' . htmlspecialchars($message) . "</div>\n";
+    }
+}
+
+if ($enforceScheduleGuard) {
+    $todayIso = date('Y-m-d');
+
+    if ($guardRequireMonday && date('N') !== '1') {
+        write_output('Niet verstuurd: vandaag is geen maandag.');
+        exit(0);
+    }
+
+    if ($guardRequireSingleRunPerDay && is_file($guardLastSentFile)) {
+        $lastSent = trim((string) file_get_contents($guardLastSentFile));
+        if ($lastSent === $todayIso) {
+            write_output('Niet verstuurd: er is vandaag al een rapportmail verstuurd.');
+            exit(0);
+        }
+    }
+}
+
+if (!isset($mailList) || !is_array($mailList) || empty($mailList)) {
+    write_output('mailList is empty in auth.php', true);
+    exit(1);
+}
+
+if (!isset($reportMail) || !is_array($reportMail)) {
+    write_output('reportMail is missing in auth.php', true);
+    exit(1);
+}
+
+
+function resolve_report_url(string $url): string
+{
+    // If already absolute, return as-is
+    if (preg_match('~^https?://~i', $url)) {
+        return $url;
+    }
+    // Build absolute URL from current request or CLI context
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $basePath = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? '/web/send_report_mail.php'), '/\\');
+    $rel = ltrim($url, '/');
+    return "$scheme://$host$basePath/$rel";
+}
+
+function build_report_url(string $baseUrl, string $company): string
+{
+    $absUrl = resolve_report_url($baseUrl);
+    $separator = str_contains($absUrl, '?') ? '&' : '?';
+    return $absUrl . $separator . http_build_query(['company' => $company], '', '&', PHP_QUERY_RFC3986);
+}
+
+function fetch_report_html(string $url): string
+{
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        if ($ch === false) {
+            throw new RuntimeException('curl_init failed');
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_CONNECTTIMEOUT => 15,
+            CURLOPT_TIMEOUT => 90,
+            CURLOPT_HTTPHEADER => ['Accept: text/html'],
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($response === false) {
+            throw new RuntimeException('Failed to fetch report HTML: ' . $error);
+        }
+        if ($httpCode < 200 || $httpCode >= 300) {
+            throw new RuntimeException('Report URL returned HTTP ' . $httpCode);
+        }
+
+        return (string) $response;
+    }
+
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'GET',
+            'timeout' => 90,
+            'header' => "Accept: text/html\r\n",
+            'ignore_errors' => true,
+        ],
+    ]);
+
+    $response = @file_get_contents($url, false, $context);
+    if ($response === false) {
+        throw new RuntimeException('Failed to fetch report HTML with file_get_contents');
+    }
+
+    return $response;
+}
+
+function smtp_read_response($socket): string
+{
+    $response = '';
+    while (($line = fgets($socket, 515)) !== false) {
+        $response .= $line;
+        if (isset($line[3]) && $line[3] === ' ') {
+            break;
+        }
+    }
+
+    if ($response === '') {
+        throw new RuntimeException('Empty SMTP response');
+    }
+
+    return $response;
+}
+
+function smtp_expect_code(string $response, array $expectedCodes): void
+{
+    $code = (int) substr($response, 0, 3);
+    if (!in_array($code, $expectedCodes, true)) {
+        throw new RuntimeException('Unexpected SMTP response [' . $code . ']: ' . trim($response));
+    }
+}
+
+function smtp_command($socket, string $command, array $expectedCodes): string
+{
+    fwrite($socket, $command . "\r\n");
+    $response = smtp_read_response($socket);
+    smtp_expect_code($response, $expectedCodes);
+    return $response;
+}
+
+function smtp_send_html_mail(array $reportMail, string $toEmail, string $subject, string $html): void
+{
+    $smtp = $reportMail['smtp'] ?? [];
+    $host = (string) ($smtp['host'] ?? '');
+    $port = (int) ($smtp['port'] ?? 587);
+    $encryption = strtolower((string) ($smtp['encryption'] ?? 'tls'));
+    $username = (string) ($smtp['username'] ?? '');
+    $password = (string) ($smtp['password'] ?? '');
+    $timeout = (int) ($smtp['timeout'] ?? 20);
+
+    if ($host === '') {
+        throw new RuntimeException('SMTP host is empty in auth.php');
+    }
+
+    $transportHost = $encryption === 'ssl' ? 'ssl://' . $host : $host;
+    $socket = @stream_socket_client($transportHost . ':' . $port, $errno, $errstr, $timeout);
+    if ($socket === false) {
+        throw new RuntimeException('SMTP connect failed: ' . $errstr . ' (' . $errno . ')');
+    }
+
+    stream_set_timeout($socket, $timeout);
+
+    try {
+        smtp_expect_code(smtp_read_response($socket), [220]);
+        smtp_command($socket, 'EHLO localhost', [250]);
+
+        if ($encryption === 'tls') {
+            smtp_command($socket, 'STARTTLS', [220]);
+            $cryptoEnabled = stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+            if ($cryptoEnabled !== true) {
+                throw new RuntimeException('Failed to enable STARTTLS');
+            }
+            smtp_command($socket, 'EHLO localhost', [250]);
+        }
+
+        if ($username !== '' || $password !== '') {
+            smtp_command($socket, 'AUTH LOGIN', [334]);
+            smtp_command($socket, base64_encode($username), [334]);
+            smtp_command($socket, base64_encode($password), [235]);
+        }
+
+        $fromEmail = (string) ($reportMail['from_email'] ?? '');
+        $fromName = (string) ($reportMail['from_name'] ?? '');
+        if ($fromEmail === '') {
+            throw new RuntimeException('from_email is empty in auth.php');
+        }
+
+        smtp_command($socket, 'MAIL FROM:<' . $fromEmail . '>', [250]);
+        smtp_command($socket, 'RCPT TO:<' . $toEmail . '>', [250, 251]);
+        smtp_command($socket, 'DATA', [354]);
+
+        $encodedSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
+        $fromHeader = $fromName !== ''
+            ? 'From: ' . mb_encode_mimeheader($fromName, 'UTF-8') . ' <' . $fromEmail . '>'
+            : 'From: <' . $fromEmail . '>';
+
+        $headers = [
+            $fromHeader,
+            'To: <' . $toEmail . '>',
+            'Subject: ' . $encodedSubject,
+            'MIME-Version: 1.0',
+            'Content-Type: text/html; charset=UTF-8',
+            'Content-Transfer-Encoding: 8bit',
+            'Date: ' . date(DATE_RFC2822),
+        ];
+
+        $message = implode("\r\n", $headers) . "\r\n\r\n" . $html;
+        $message = preg_replace("/(\r\n|\n|\r)/", "\r\n", $message);
+        $message = preg_replace('/^\./m', '..', $message);
+
+        fwrite($socket, $message . "\r\n.\r\n");
+        smtp_expect_code(smtp_read_response($socket), [250]);
+        smtp_command($socket, 'QUIT', [221]);
+    } finally {
+        fclose($socket);
+    }
+}
+
+function send_html_mail(array $reportMail, string $toEmail, string $subject, string $html): void
+{
+    $transport = strtolower((string) ($reportMail['transport'] ?? 'mail'));
+
+    if ($transport === 'smtp') {
+        smtp_send_html_mail($reportMail, $toEmail, $subject, $html);
+        return;
+    }
+
+    $fromEmail = (string) ($reportMail['from_email'] ?? '');
+    $fromName = (string) ($reportMail['from_name'] ?? '');
+    if ($fromEmail === '') {
+        throw new RuntimeException('from_email is empty in auth.php');
+    }
+
+    $encodedSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
+    $fromHeader = $fromName !== ''
+        ? 'From: ' . mb_encode_mimeheader($fromName, 'UTF-8') . ' <' . $fromEmail . '>'
+        : 'From: <' . $fromEmail . '>';
+
+    $headers = [
+        'MIME-Version: 1.0',
+        'Content-Type: text/html; charset=UTF-8',
+        'Content-Transfer-Encoding: 8bit',
+        $fromHeader,
+    ];
+
+    $sent = mail($toEmail, $encodedSubject, $html, implode("\r\n", $headers));
+    if ($sent !== true) {
+        throw new RuntimeException('mail() failed for ' . $toEmail);
+    }
+}
+
+$reportUrl = trim((string) ($reportMail['report_url'] ?? ''));
+if ($reportUrl === '') {
+    write_output('report_url is empty in auth.php', true);
+    exit(1);
+}
+
+$subjectPrefix = trim((string) ($reportMail['subject_prefix'] ?? 'Openstaande posten debiteuren'));
+$dateText = date('d-m-Y');
+
+$ok = 0;
+$failed = 0;
+
+foreach ($mailList as $recipient => $company) {
+    $recipient = trim((string) $recipient);
+    $company = trim((string) $company);
+
+    if ($recipient === '' || $company === '') {
+        $failed++;
+        write_output('Skipped invalid mailList entry', true);
+        continue;
+    }
+
+    $url = build_report_url($reportUrl, $company);
+
+    try {
+        $html = fetch_report_html($url);
+        $subject = $subjectPrefix . ' - ' . $company . ' - ' . $dateText;
+        send_html_mail($reportMail, $recipient, $subject, $html);
+        $ok++;
+        write_output("Sent to {$recipient} ({$company})");
+    } catch (Throwable $exception) {
+        $failed++;
+        write_output('Failed for ' . $recipient . ' (' . $company . '): ' . $exception->getMessage(), true);
+    }
+}
+
+if ($ok > 0 && $enforceScheduleGuard && $guardRequireSingleRunPerDay) {
+    @file_put_contents($guardLastSentFile, date('Y-m-d'));
+}
+
+write_output("Done. Sent: {$ok}, failed: {$failed}");
+exit($failed > 0 ? 2 : 0);
