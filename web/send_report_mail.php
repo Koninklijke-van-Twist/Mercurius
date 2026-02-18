@@ -1,3 +1,10 @@
+function encode_mimeheader_fallback($str) {
+    if (function_exists('mb_encode_mimeheader')) {
+        return mb_encode_mimeheader($str, 'UTF-8');
+    }
+    // Fallback: base64 encode UTF-8
+    return '=?UTF-8?B?' . base64_encode($str) . '?=';
+}
 <?php
 require __DIR__ . '/auth.php';
 
@@ -174,7 +181,7 @@ function smtp_send_html_mail(array $reportMail, string $toEmail, string $subject
 
         $encodedSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
         $fromHeader = $fromName !== ''
-            ? 'From: ' . mb_encode_mimeheader($fromName, 'UTF-8') . ' <' . $fromEmail . '>'
+            ? 'From: ' . encode_mimeheader_fallback($fromName) . ' <' . $fromEmail . '>'
             : 'From: <' . $fromEmail . '>';
 
         $headers = [
@@ -199,46 +206,13 @@ function smtp_send_html_mail(array $reportMail, string $toEmail, string $subject
     }
 }
 
-
-function encode_mimeheader_fallback($str) {
-    if (function_exists('mb_encode_mimeheader')) {
-        return mb_encode_mimeheader($str, 'UTF-8');
-    }
-    // Fallback: base64 encode UTF-8
-    return '=?UTF-8?B?' . base64_encode($str) . '?=';
-}
-
 function send_html_mail(array $reportMail, string $toEmail, string $subject, string $html): void
 {
-    $transport = strtolower((string) ($reportMail['transport'] ?? 'mail'));
-
-    if ($transport === 'smtp') {
-        smtp_send_html_mail($reportMail, $toEmail, $subject, $html);
-        return;
+    // Always use SMTP, never mail()
+    if (!isset($reportMail['smtp']) || !is_array($reportMail['smtp']) || empty($reportMail['smtp']['host'])) {
+        throw new RuntimeException('SMTP config ontbreekt of is onvolledig in auth.php');
     }
-
-    $fromEmail = (string) ($reportMail['from_email'] ?? '');
-    $fromName = (string) ($reportMail['from_name'] ?? '');
-    if ($fromEmail === '') {
-        throw new RuntimeException('from_email is empty in auth.php');
-    }
-
-    $encodedSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
-    $fromHeader = $fromName !== ''
-        ? 'From: ' . encode_mimeheader_fallback($fromName) . ' <' . $fromEmail . '>'
-        : 'From: <' . $fromEmail . '>';
-
-    $headers = [
-        'MIME-Version: 1.0',
-        'Content-Type: text/html; charset=UTF-8',
-        'Content-Transfer-Encoding: 8bit',
-        $fromHeader,
-    ];
-
-    $sent = mail($toEmail, $encodedSubject, $html, implode("\r\n", $headers));
-    if ($sent !== true) {
-        throw new RuntimeException('mail() failed for ' . $toEmail);
-    }
+    smtp_send_html_mail($reportMail, $toEmail, $subject, $html);
 }
 
 $reportUrl = trim((string) ($reportMail['report_url'] ?? ''));
