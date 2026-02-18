@@ -1,10 +1,3 @@
-function encode_mimeheader_fallback($str) {
-    if (function_exists('mb_encode_mimeheader')) {
-        return mb_encode_mimeheader($str, 'UTF-8');
-    }
-    // Fallback: base64 encode UTF-8
-    return '=?UTF-8?B?' . base64_encode($str) . '?=';
-}
 <?php
 require __DIR__ . '/auth.php';
 
@@ -26,6 +19,15 @@ function write_output(string $message, bool $isError = false): void
     } else {
         echo '<div>' . htmlspecialchars($message) . "</div>\n";
     }
+}
+
+function encode_mimeheader_fallback($str)
+{
+    if (function_exists('mb_encode_mimeheader')) {
+        return mb_encode_mimeheader($str, 'UTF-8');
+    }
+    // Fallback: base64 encode UTF-8
+    return '=?UTF-8?B?' . base64_encode($str) . '?=';
 }
 
 if ($enforceScheduleGuard) {

@@ -1,4 +1,10 @@
 <?php
+
+// Output buffering voor mail/print post-processing
+if (isset($isMailReport) && $isMailReport) {
+    ob_start();
+}
+
 require __DIR__ . "/auth.php";
 require __DIR__ . "/logincheck.php";
 require __DIR__ . "/odata.php";
@@ -526,6 +532,7 @@ $baseQueryParams = [
     'open_filter' => $openFilter,
     'due_before' => $dueBeforeRaw,
 ];
+
 
 
 if (isset($isMailReport) && $isMailReport) {
@@ -1239,5 +1246,22 @@ if (isset($isMailReport) && $isMailReport) {
         updateAllButtonState();
     })();
 </script>
+
+<?php
+// Einde van output buffering en post-processing voor mail/print
+if (isset($isMailReport) && $isMailReport) {
+    $html = ob_get_clean();
+    // Verwijder alleen de @media print { ... } wrappers, behoud de inhoud
+// Dit werkt ook als er genestelde accolades zijn in de print block
+    $html = preg_replace_callback(
+        '/@media\s+print\s*{((?:[^{}]+|{[^{}]*})*)}/is',
+        function ($m) {
+            return $m[1]; // Alleen de inhoud binnen de @media print { ... }
+        },
+        $html
+    );
+    echo $html;
+}
+?>
 
 </html>
