@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/functions.php';
 
+$isMailReport = false;
 // Printvriendelijke modus forceren via ?printfriendly=true
 if ((isset($_GET['printfriendly']) && $_GET['printfriendly'] == 'true') || (isset($isMailReport) && $isMailReport)) {
     ob_start();
@@ -667,6 +668,12 @@ if (isset($isMailReport) && $isMailReport) {
         <h1>Openstaande posten debiteuren - <span class="company-name"><?= $selectedCompany ?></span></h1>
         <div class="print-date">Datum: <?= htmlspecialchars($todayFormatted) ?></div>
         <form class="controls" method="get">
+            <?= injectTimerHtml([
+                'statusUrl' => 'odata.php?action=cache_status',
+                'title' => 'Cachebestanden',
+                'label' => 'Cache',
+                'css' => '{{root}} .odata-cache-widget{top:-23px;left:auto;right:0px;} {{root}} .odata-cache-popout{top:64px;left:auto;right:20px;}'
+            ]) ?>
             <label>
                 <select id="companySelect" name="company">
                     <?php foreach ($companies as $company): ?>
