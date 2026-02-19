@@ -2,9 +2,9 @@
 require_once __DIR__ . '/functions.php';
 
 // Printvriendelijke modus forceren via ?printfriendly=true
-if ((isset($_GET['printfriendly']) && $_GET['printfriendly'] === 'true') || (isset($isMailReport) && $isMailReport)) {
-    $isMailReport = true;
+if ((isset($_GET['printfriendly']) && $_GET['printfriendly'] == 'true') || (isset($isMailReport) && $isMailReport)) {
     ob_start();
+    $isMailReport = true;
 }
 
 require __DIR__ . "/auth.php";
@@ -543,10 +543,10 @@ if (isset($isMailReport) && $isMailReport) {
             color: var(--muted);
         }
 
-        <?php if ($isMailReport): ?>
+        <?php if (!$isMailReport): ?>
             @media print {
 
-            <?php endif ?>
+            <?php endif; ?>
             @page {
                 margin: 10mm;
             }
@@ -614,10 +614,12 @@ if (isset($isMailReport) && $isMailReport) {
                 page-break-after: avoid;
             }
 
-            <?php if ($isMailReport): ?>
+            <?php if (!$isMailReport): ?>
             }
 
-        <?php endif ?> @media (max-width: 900px) {
+        <?php endif; ?>
+
+        @media (max-width: 900px) {
             body {
                 padding: 24px 14px 50px;
             }
@@ -732,7 +734,8 @@ if (isset($isMailReport) && $isMailReport) {
             <hr>
             <div class="customer-header">
                 <div>Debiteur: <a class="customer-no"
-                        href="<?= htmlspecialchars($customerLink) ?>"><?= htmlspecialchars($customerNoValue) ?></a>&nbsp;</div>
+                        href="<?= htmlspecialchars($customerLink) ?>"><?= htmlspecialchars($customerNoValue) ?></a>&nbsp;
+                </div>
                 <div><?= htmlspecialchars((string) ($customer['Name'] ?? '')) ?>&nbsp;</div>
                 <div><span>Woonplaats:</span> <?= htmlspecialchars((string) ($customer['City'] ?? '')) ?>&nbsp;</div>
                 <div>
