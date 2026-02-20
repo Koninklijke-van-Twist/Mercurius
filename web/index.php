@@ -780,7 +780,7 @@ if (isset($isMailReport) && $isMailReport) {
                         <th>Bkst nr</th>
                         <th>Gemaakt</th>
                         <th class="due-date-head">Vervalt</th>
-                        <th class="amount">Verschuldigd</th>
+                        <th class="amount">Bedrag</th>
                         <th title="Aantal dagen dat deze post vervallen is.">Dgn</th>
                         <th>Omschrijving</th>
                         <th title="Verkoper, afdeling of project die deze verkoop gemaakt heeft.">Afdeling</th>
