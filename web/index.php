@@ -236,7 +236,6 @@ $baseQueryParams = [
 if (isset($isMailReport) && $isMailReport) {
     // Forceer print CSS inline voor mail
     echo '<style>@media print { body { background: #fff !important; } } body { background: #fff !important; } </style>';
-    echo '<script>window.print = function(){};</script>';
 }
 ?><!doctype html>
 <html lang="nl">
@@ -667,56 +666,58 @@ if (isset($isMailReport) && $isMailReport) {
     <header>
         <h1>Openstaande posten debiteuren - <span class="company-name"><?= $selectedCompany ?></span></h1>
         <div class="print-date">Datum: <?= htmlspecialchars($todayFormatted) ?></div>
-        <form class="controls" method="get">
-            <?= injectTimerHtml([
-                'statusUrl' => 'odata.php?action=cache_status',
-                'title' => 'Cachebestanden',
-                'label' => 'Cache',
-                'css' => '{{root}} .odata-cache-widget{top:-23px;left:auto;right:0px;} {{root}} .odata-cache-popout{top:64px;left:auto;right:20px;}'
-            ]) ?>
-            <label>
-                <select id="companySelect" name="company">
-                    <?php foreach ($companies as $company): ?>
-                        <option value="<?= htmlspecialchars($company) ?>" <?= $company === $selectedCompany ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($company) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>
-                <input type="date" id="dueBeforeInput" name="due_before" value="<?= htmlspecialchars($dueBeforeRaw) ?>"
-                    max="<?= htmlspecialchars($today->format('Y-m-d')) ?>"
-                    title="Toon posten met vervaldatum voor deze datum" />
-            </label>
-            <label>
-                <select id="customerSelect" name="customer_no">
-                    <option value="">Alle debiteuren</option>
-                    <?php foreach ($customerOptions as $customerNo): ?>
-                        <?php $customerName = (string) ($customerIndex[$customerNo]['Name'] ?? ''); ?>
-                        <option value="<?= htmlspecialchars($customerNo) ?>" <?= $customerNo === $selectedCustomerNo ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($customerNo . ($customerName !== '' ? ' - ' . $customerName : '')) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
+        <?php if (!$isMailReport): ?>
+            <form class="controls" method="get">
+                <?= injectTimerHtml([
+                    'statusUrl' => 'odata.php?action=cache_status',
+                    'title' => 'Cachebestanden',
+                    'label' => 'Cache',
+                    'css' => '{{root}} .odata-cache-widget{top:-23px;left:auto;right:0px;} {{root}} .odata-cache-popout{top:64px;left:auto;right:20px;}'
+                ]) ?>
+                <label>
+                    <select id="companySelect" name="company">
+                        <?php foreach ($companies as $company): ?>
+                            <option value="<?= htmlspecialchars($company) ?>" <?= $company === $selectedCompany ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($company) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>
+                    <input type="date" id="dueBeforeInput" name="due_before" value="<?= htmlspecialchars($dueBeforeRaw) ?>"
+                        max="<?= htmlspecialchars($today->format('Y-m-d')) ?>"
+                        title="Toon posten met vervaldatum voor deze datum" />
+                </label>
+                <label>
+                    <select id="customerSelect" name="customer_no">
+                        <option value="">Alle debiteuren</option>
+                        <?php foreach ($customerOptions as $customerNo): ?>
+                            <?php $customerName = (string) ($customerIndex[$customerNo]['Name'] ?? ''); ?>
+                            <option value="<?= htmlspecialchars($customerNo) ?>" <?= $customerNo === $selectedCustomerNo ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($customerNo . ($customerName !== '' ? ' - ' . $customerName : '')) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
 
-            <label>
-                <input type="text" name="search" value="<?= htmlspecialchars($search) ?>"
-                    placeholder="Zoek in alle tekst" />
-            </label>
-            <label>
-                <select name="open_filter">
-                    <option value="open" <?= $openFilter === 'open' ? 'selected' : '' ?>>Enkel openstaand</option>
-                    <option value="closed" <?= $openFilter === 'closed' ? 'selected' : '' ?>>Enkel gesloten</option>
-                    <option value="both" <?= $openFilter === 'both' ? 'selected' : '' ?>>Beide</option>
-                </select>
-            </label>
-            <button id="filterAllButton" type="submit" name="filter" value="all"
-                class="<?= $filter === 'all' ? 'filter-active' : '' ?>">Alle
-                posten</button>
-            <button type="submit" name="filter" value="overdue"
-                class="<?= $filter === 'overdue' ? 'filter-active' : '' ?>">Vervallen posten</button>
-        </form>
+                <label>
+                    <input type="text" name="search" value="<?= htmlspecialchars($search) ?>"
+                        placeholder="Zoek in alle tekst" />
+                </label>
+                <label>
+                    <select name="open_filter">
+                        <option value="open" <?= $openFilter === 'open' ? 'selected' : '' ?>>Enkel openstaand</option>
+                        <option value="closed" <?= $openFilter === 'closed' ? 'selected' : '' ?>>Enkel gesloten</option>
+                        <option value="both" <?= $openFilter === 'both' ? 'selected' : '' ?>>Beide</option>
+                    </select>
+                </label>
+                <button id="filterAllButton" type="submit" name="filter" value="all"
+                    class="<?= $filter === 'all' ? 'filter-active' : '' ?>">Alle
+                    posten</button>
+                <button type="submit" name="filter" value="overdue"
+                    class="<?= $filter === 'overdue' ? 'filter-active' : '' ?>">Vervallen posten</button>
+            </form>
+        <?php endif; ?>
     </header>
 
     <?php if (empty($groups)): ?>
@@ -857,109 +858,111 @@ if (isset($isMailReport) && $isMailReport) {
 
 </body>
 
-<script>
-    (function ()
-    {
-        const body = document.body;
-        const companySelect = document.getElementById('companySelect');
-        const customerSelect = document.getElementById('customerSelect');
-        const dueBeforeInput = document.getElementById('dueBeforeInput');
-        const filterAllButton = document.getElementById('filterAllButton');
-
-        function addHoverClass (element, className)
+<?php if (!$isMailReport): ?>
+    <script>
+        (function ()
         {
-            if (!element)
-            {
-                return;
-            }
-            const addClass = () => body.classList.add(className);
-            const removeClass = () => body.classList.remove(className);
-            element.addEventListener('mouseenter', addClass);
-            element.addEventListener('mouseleave', removeClass);
-            element.addEventListener('focus', addClass);
-            element.addEventListener('blur', removeClass);
-        }
+            const body = document.body;
+            const companySelect = document.getElementById('companySelect');
+            const customerSelect = document.getElementById('customerSelect');
+            const dueBeforeInput = document.getElementById('dueBeforeInput');
+            const filterAllButton = document.getElementById('filterAllButton');
 
-        addHoverClass(companySelect, 'highlight-company');
-        addHoverClass(customerSelect, 'highlight-customers');
-        addHoverClass(dueBeforeInput, 'highlight-due-date');
-
-        function isDueBeforeActive ()
-        {
-            return !!(dueBeforeInput && dueBeforeInput.value.trim() !== '');
-        }
-
-        function updateAllButtonState ()
-        {
-            if (!filterAllButton)
+            function addHoverClass (element, className)
             {
-                return;
-            }
-            const isBlocked = isDueBeforeActive();
-            filterAllButton.classList.toggle('is-disabled', isBlocked);
-            filterAllButton.setAttribute('aria-disabled', isBlocked ? 'true' : 'false');
-        }
-
-        function setWarningState (active)
-        {
-            if (!dueBeforeInput)
-            {
-                return;
-            }
-            dueBeforeInput.classList.toggle('due-before-warning', active);
-        }
-
-        function triggerShake ()
-        {
-            if (!dueBeforeInput)
-            {
-                return;
-            }
-            dueBeforeInput.classList.remove('shake');
-            void dueBeforeInput.offsetWidth;
-            dueBeforeInput.classList.add('shake');
-        }
-
-        if (dueBeforeInput)
-        {
-            dueBeforeInput.addEventListener('input', () =>
-            {
-                updateAllButtonState();
-            });
-        }
-
-        if (filterAllButton)
-        {
-            filterAllButton.addEventListener('mouseenter', () =>
-            {
-                if (isDueBeforeActive())
-                {
-                    setWarningState(true);
-                }
-            });
-            filterAllButton.addEventListener('mouseleave', () =>
-            {
-                setWarningState(false);
-            });
-            filterAllButton.addEventListener('click', (event) =>
-            {
-                if (!isDueBeforeActive())
+                if (!element)
                 {
                     return;
                 }
-                event.preventDefault();
-                setWarningState(true);
-                triggerShake();
-                if (dueBeforeInput)
-                {
-                    dueBeforeInput.focus();
-                }
-            });
-        }
+                const addClass = () => body.classList.add(className);
+                const removeClass = () => body.classList.remove(className);
+                element.addEventListener('mouseenter', addClass);
+                element.addEventListener('mouseleave', removeClass);
+                element.addEventListener('focus', addClass);
+                element.addEventListener('blur', removeClass);
+            }
 
-        updateAllButtonState();
-    })();
-</script>
+            addHoverClass(companySelect, 'highlight-company');
+            addHoverClass(customerSelect, 'highlight-customers');
+            addHoverClass(dueBeforeInput, 'highlight-due-date');
+
+            function isDueBeforeActive ()
+            {
+                return !!(dueBeforeInput && dueBeforeInput.value.trim() !== '');
+            }
+
+            function updateAllButtonState ()
+            {
+                if (!filterAllButton)
+                {
+                    return;
+                }
+                const isBlocked = isDueBeforeActive();
+                filterAllButton.classList.toggle('is-disabled', isBlocked);
+                filterAllButton.setAttribute('aria-disabled', isBlocked ? 'true' : 'false');
+            }
+
+            function setWarningState (active)
+            {
+                if (!dueBeforeInput)
+                {
+                    return;
+                }
+                dueBeforeInput.classList.toggle('due-before-warning', active);
+            }
+
+            function triggerShake ()
+            {
+                if (!dueBeforeInput)
+                {
+                    return;
+                }
+                dueBeforeInput.classList.remove('shake');
+                void dueBeforeInput.offsetWidth;
+                dueBeforeInput.classList.add('shake');
+            }
+
+            if (dueBeforeInput)
+            {
+                dueBeforeInput.addEventListener('input', () =>
+                {
+                    updateAllButtonState();
+                });
+            }
+
+            if (filterAllButton)
+            {
+                filterAllButton.addEventListener('mouseenter', () =>
+                {
+                    if (isDueBeforeActive())
+                    {
+                        setWarningState(true);
+                    }
+                });
+                filterAllButton.addEventListener('mouseleave', () =>
+                {
+                    setWarningState(false);
+                });
+                filterAllButton.addEventListener('click', (event) =>
+                {
+                    if (!isDueBeforeActive())
+                    {
+                        return;
+                    }
+                    event.preventDefault();
+                    setWarningState(true);
+                    triggerShake();
+                    if (dueBeforeInput)
+                    {
+                        dueBeforeInput.focus();
+                    }
+                });
+            }
+
+            updateAllButtonState();
+        })();
+    </script>
+<?php endif; ?>
 
 <?php
 // Einde van output buffering en post-processing voor mail/print

@@ -4,6 +4,7 @@ ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 require __DIR__ . '/auth.php';
 require_once __DIR__ . '/css_inliner.php';
+require_once __DIR__ . '/html_to_pdf.php';
 
 $enforceScheduleGuard = true;
 $guardRequireMonday = true;
@@ -89,18 +90,55 @@ function fetch_report_html(string $company): string
     if (!file_exists($indexFile)) {
         throw new RuntimeException('index.php niet gevonden');
     }
-    // Simuleer GET-parameter en mailmodus
+    // Simuleer GET-parameters en mailmodus met vaste mailfilters.
+    // Dit voorkomt dat bestaande query-params (bijv. due_before/search) een lege mail veroorzaken.
+    $mailQuery = [
+        'company' => $company,
+        'printfriendly' => 'true',
+        'filter' => 'all',
+        'open_filter' => 'both',
+        'search' => '',
+        'due_before' => '',
+        'customer_no' => '',
+    ];
+
+    $originalGet = $_GET;
+    $_GET = $mailQuery;
+
+    // Flag blijft beschikbaar voor index.php
     $isMailReport = true;
-    $html = (function () use ($indexFile, $company) {
-        ob_start();
-        $_GET['company'] = $company;
-        $_GET['printfriendly'] = 'true';
-        include $indexFile;
-        return ob_get_clean();
-    })();
+
+    try {
+        $html = (function () use ($indexFile) {
+            ob_start();
+            include $indexFile;
+            return ob_get_clean();
+        })();
+    } finally {
+        $_GET = $originalGet;
+    }
+
     if (!$html || strlen(trim($html)) < 100) {
         throw new RuntimeException('Lege of te korte HTML uit index.php');
     }
+    return $html;
+}
+
+function sanitize_mail_html(string $html): string
+{
+    // Verwijder volledige cache-widget root (incl. inline script/style) indien aanwezig.
+    $html = preg_replace('/<div\b[^>]*class="[^"]*odata-cache-root[^"]*"[^>]*>.*?<\/div>\s*<\/div>/is', '', $html) ?? $html;
+
+    // Verwijder controls-formulier volledig voor mailweergave.
+    $html = preg_replace('/<form\b[^>]*class="[^"]*controls[^"]*"[^>]*>.*?<\/form>/is', '', $html) ?? $html;
+
+    // Verwijder alle scripts en noscript-inhoud.
+    $html = preg_replace('/<script\b[^>]*>.*?<\/script>/is', '', $html) ?? $html;
+    $html = preg_replace('/<noscript\b[^>]*>.*?<\/noscript>/is', '', $html) ?? $html;
+
+    // Extra defensief: verwijder bekende cache-widget JS-residu als plaintext.
+    $html = preg_replace('/const\s+statusUrl\s*=.*?setInterval\s*\(\s*function\s*\(\)\s*\{.*?\}\s*,\s*1000\s*\)\s*;\s*\}\)\s*\(\)\s*;?/is', '', $html) ?? $html;
+
     return $html;
 }
 
@@ -137,7 +175,30 @@ function smtp_command($socket, string $command, array $expectedCodes): string
     return $response;
 }
 
-function smtp_send_html_mail(array $reportMail, string $toEmail, string $subject, string $html): void
+function normalize_recipients(array $recipients): array
+{
+    $normalized = [];
+    $seen = [];
+
+    foreach ($recipients as $recipient) {
+        $recipient = trim((string) $recipient);
+        if ($recipient === '' || strpos($recipient, '@') === false) {
+            continue;
+        }
+
+        $key = strtolower($recipient);
+        if (isset($seen[$key])) {
+            continue;
+        }
+
+        $seen[$key] = true;
+        $normalized[] = $recipient;
+    }
+
+    return $normalized;
+}
+
+function smtp_send_pdf_mail(array $reportMail, array $toEmails, string $subject, string $textBody, string $pdfBinary, string $pdfFilename): void
 {
     $smtp = $reportMail['smtp'] ?? [];
     $host = (string) ($smtp['host'] ?? '');
@@ -149,6 +210,11 @@ function smtp_send_html_mail(array $reportMail, string $toEmail, string $subject
 
     if ($host === '') {
         throw new RuntimeException('SMTP host is empty in auth.php');
+    }
+
+    $toEmails = normalize_recipients($toEmails);
+    if (empty($toEmails)) {
+        throw new RuntimeException('Recipient list is empty');
     }
 
     $transportHost = $encryption === 'ssl' ? 'ssl://' . $host : $host;
@@ -185,7 +251,9 @@ function smtp_send_html_mail(array $reportMail, string $toEmail, string $subject
         }
 
         smtp_command($socket, 'MAIL FROM:<' . $fromEmail . '>', [250]);
-        smtp_command($socket, 'RCPT TO:<' . $toEmail . '>', [250, 251]);
+        foreach ($toEmails as $toEmail) {
+            smtp_command($socket, 'RCPT TO:<' . $toEmail . '>', [250, 251]);
+        }
         smtp_command($socket, 'DATA', [354]);
 
         $encodedSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
@@ -193,17 +261,32 @@ function smtp_send_html_mail(array $reportMail, string $toEmail, string $subject
             ? 'From: ' . encode_mimeheader_fallback($fromName) . ' <' . $fromEmail . '>'
             : 'From: <' . $fromEmail . '>';
 
+        $boundary = '=_Part_' . bin2hex(random_bytes(12));
+        $safeFilename = str_replace(["\r", "\n", '"'], ['', '', '_'], $pdfFilename);
+        $pdfBase64 = chunk_split(base64_encode($pdfBinary));
+
         $headers = [
             $fromHeader,
-            'To: <' . $toEmail . '>',
+            'To: ' . implode(', ', array_map(static fn(string $email): string => '<' . $email . '>', $toEmails)),
             'Subject: ' . $encodedSubject,
             'MIME-Version: 1.0',
-            'Content-Type: text/html; charset=UTF-8',
-            'Content-Transfer-Encoding: 8bit',
+            'Content-Type: multipart/mixed; boundary="' . $boundary . '"',
             'Date: ' . date(DATE_RFC2822),
         ];
 
-        $message = implode("\r\n", $headers) . "\r\n\r\n" . $html;
+        $messageBody =
+            '--' . $boundary . "\r\n" .
+            "Content-Type: text/plain; charset=UTF-8\r\n" .
+            "Content-Transfer-Encoding: 8bit\r\n\r\n" .
+            $textBody . "\r\n\r\n" .
+            '--' . $boundary . "\r\n" .
+            'Content-Type: application/pdf; name="' . $safeFilename . "\"\r\n" .
+            "Content-Transfer-Encoding: base64\r\n" .
+            'Content-Disposition: attachment; filename="' . $safeFilename . "\"\r\n\r\n" .
+            $pdfBase64 . "\r\n" .
+            '--' . $boundary . "--\r\n";
+
+        $message = implode("\r\n", $headers) . "\r\n\r\n" . $messageBody;
         $message = preg_replace("/(\r\n|\n|\r)/", "\r\n", $message);
         $message = preg_replace('/^\./m', '..', $message);
 
@@ -215,13 +298,21 @@ function smtp_send_html_mail(array $reportMail, string $toEmail, string $subject
     }
 }
 
-function send_html_mail(array $reportMail, string $toEmail, string $subject, string $html): void
+function slugify_company(string $company): string
+{
+    $slug = strtolower(trim($company));
+    $slug = preg_replace('/[^a-z0-9]+/i', '-', $slug) ?? $slug;
+    $slug = trim($slug, '-');
+    return $slug !== '' ? $slug : 'bedrijf';
+}
+
+function send_pdf_mail(array $reportMail, array $toEmails, string $subject, string $textBody, string $pdfBinary, string $pdfFilename): void
 {
     // Always use SMTP, never mail()
     if (!isset($reportMail['smtp']) || !is_array($reportMail['smtp']) || empty($reportMail['smtp']['host'])) {
         throw new RuntimeException('SMTP config ontbreekt of is onvolledig in auth.php');
     }
-    smtp_send_html_mail($reportMail, $toEmail, $subject, $html);
+    smtp_send_pdf_mail($reportMail, $toEmails, $subject, $textBody, $pdfBinary, $pdfFilename);
 }
 
 $reportUrl = trim((string) ($reportMail['report_url'] ?? ''));
@@ -236,6 +327,7 @@ $dateText = date('d-m-Y');
 $ok = 0;
 $failed = 0;
 
+$recipientsByCompany = [];
 foreach ($mailList as $recipient => $company) {
     $recipient = trim((string) $recipient);
     $company = trim((string) $company);
@@ -246,8 +338,21 @@ foreach ($mailList as $recipient => $company) {
         continue;
     }
 
+    if (!isset($recipientsByCompany[$company])) {
+        $recipientsByCompany[$company] = [];
+    }
+    $recipientsByCompany[$company][] = $recipient;
+}
+
+foreach ($recipientsByCompany as $company => $recipients) {
     try {
-        $html = fetch_report_html($company);
+        $recipients = normalize_recipients($recipients);
+        if (empty($recipients)) {
+            throw new RuntimeException('Geen geldige ontvangers voor bedrijf');
+        }
+
+        $html = fetch_report_html((string) $company);
+        $html = sanitize_mail_html($html);
         // Zet alle CSS inline voor mail/PDF (heeft geen effect op index.php)
         $html = inline_css_from_style_tags($html);
         // Vervang alle <a>...</a> door alleen de tekstinhoud
@@ -258,13 +363,24 @@ foreach ($mailList as $recipient => $company) {
             },
             $html
         );
+        // Verwijder scripts nogmaals defensief (na inlinen)
+        $html = preg_replace('/<script\b[^>]*>.*?<\/script>/is', '', $html) ?? $html;
+
         $subject = $subjectPrefix . ' - ' . $company . ' - ' . $dateText;
-        send_html_mail($reportMail, $recipient, $subject, $html);
+        $pdfBinary = htmlToPdf($html, $reportMail);
+        $pdfFilename = 'openstaande-posten-' . slugify_company((string) $company) . '-' . date('Ymd') . '.pdf';
+        $textBody = 'In de bijlage vindt u het rapport voor ' . $company . ' (' . $dateText . ').';
+
+        send_pdf_mail($reportMail, $recipients, $subject, $textBody, $pdfBinary, $pdfFilename);
         $ok++;
-        write_output("Sent to {$recipient} ({$company})");
+        $recipientLines = array_map(
+            static fn(string $email): string => '- ' . $email,
+            $recipients
+        );
+        write_output("Verstuurd - {$company}:\n" . implode("\n", $recipientLines));
     } catch (Throwable $exception) {
         $failed++;
-        write_output('Failed for ' . $recipient . ' (' . $company . '): ' . $exception->getMessage(), true);
+        write_output('Failed for company ' . $company . ': ' . $exception->getMessage(), true);
     }
 }
 
