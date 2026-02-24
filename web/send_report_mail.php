@@ -198,7 +198,7 @@ function normalize_recipients(array $recipients): array
     return $normalized;
 }
 
-function smtp_send_pdf_mail(array $reportMail, array $toEmails, string $subject, string $textBody, string $pdfBinary, string $pdfFilename): void
+function smtp_send_pdf_mail(array $reportMail, array $toEmails, string $subject, string $textBody, string $pdfBinary, string $pdfFilename, ?string $htmlBody = null): void
 {
     $smtp = $reportMail['smtp'] ?? [];
     $host = (string) ($smtp['host'] ?? '');
@@ -262,6 +262,7 @@ function smtp_send_pdf_mail(array $reportMail, array $toEmails, string $subject,
             : 'From: <' . $fromEmail . '>';
 
         $boundary = '=_Part_' . bin2hex(random_bytes(12));
+        $altBoundary = '=_Alt_' . bin2hex(random_bytes(12));
         $safeFilename = str_replace(["\r", "\n", '"'], ['', '', '_'], $pdfFilename);
         $pdfBase64 = chunk_split(base64_encode($pdfBinary));
 
@@ -274,11 +275,26 @@ function smtp_send_pdf_mail(array $reportMail, array $toEmails, string $subject,
             'Date: ' . date(DATE_RFC2822),
         ];
 
-        $messageBody =
-            '--' . $boundary . "\r\n" .
+        $textPart =
+            '--' . $altBoundary . "\r\n" .
             "Content-Type: text/plain; charset=UTF-8\r\n" .
             "Content-Transfer-Encoding: 8bit\r\n\r\n" .
-            $textBody . "\r\n\r\n" .
+            $textBody . "\r\n\r\n";
+
+        if ($htmlBody !== null && trim($htmlBody) !== '') {
+            $textPart .=
+                '--' . $altBoundary . "\r\n" .
+                "Content-Type: text/html; charset=UTF-8\r\n" .
+                "Content-Transfer-Encoding: 8bit\r\n\r\n" .
+                $htmlBody . "\r\n\r\n";
+        }
+
+        $textPart .= '--' . $altBoundary . "--\r\n";
+
+        $messageBody =
+            '--' . $boundary . "\r\n" .
+            'Content-Type: multipart/alternative; boundary="' . $altBoundary . "\"\r\n\r\n" .
+            $textPart . "\r\n" .
             '--' . $boundary . "\r\n" .
             'Content-Type: application/pdf; name="' . $safeFilename . "\"\r\n" .
             "Content-Transfer-Encoding: base64\r\n" .
@@ -374,13 +390,13 @@ function format_eur_nl(float $amount): string
     return '€' . number_format($amount, 2, ',', '.');
 }
 
-function send_pdf_mail(array $reportMail, array $toEmails, string $subject, string $textBody, string $pdfBinary, string $pdfFilename): void
+function send_pdf_mail(array $reportMail, array $toEmails, string $subject, string $textBody, string $pdfBinary, string $pdfFilename, ?string $htmlBody = null): void
 {
     // Always use SMTP, never mail()
     if (!isset($reportMail['smtp']) || !is_array($reportMail['smtp']) || empty($reportMail['smtp']['host'])) {
         throw new RuntimeException('SMTP config ontbreekt of is onvolledig in auth.php');
     }
-    smtp_send_pdf_mail($reportMail, $toEmails, $subject, $textBody, $pdfBinary, $pdfFilename);
+    smtp_send_pdf_mail($reportMail, $toEmails, $subject, $textBody, $pdfBinary, $pdfFilename, $htmlBody);
 }
 
 $reportUrl = trim((string) ($reportMail['report_url'] ?? ''));
@@ -443,11 +459,20 @@ foreach ($recipientsByCompany as $company => $recipients) {
         $totaalText = format_eur_nl((float) ($stats['totaal'] ?? 0.0));
         $textBody = "Beste collega,\n\n"
             . "Bijgevoegd is de rapportage van vervallen posten.\n\n"
-            . "Er staan {$postenText} vervallen posten open, verspreid over {$debiteurenText} debiteuren, met een totaalwaarde van {$totaalText}.\nU kunt deze rapportage ook zien op: <a href=\"https://sleutels.kvt.nl/mercurius/\">Mercurius</a>\n"
+            . "Er staan {$postenText} vervallen posten open, verspreid over {$debiteurenText} debiteuren, met een totaalwaarde van {$totaalText}.\n"
+            . "U kunt deze rapportage ook zien op: https://sleutels.kvt.nl/mercurius/\n\n"
             . "Met vriendelijke groet,\n\n"
             . "KVT Robot";
 
-        send_pdf_mail($reportMail, $recipients, $subject, $textBody, $pdfBinary, $pdfFilename);
+        $htmlBody = '<!doctype html><html><body>'
+            . '<p>Beste collega,</p>'
+            . '<p>Bijgevoegd is de rapportage van vervallen posten.</p>'
+            . '<p>Er staan <strong>' . htmlspecialchars($postenText, ENT_QUOTES, 'UTF-8') . '</strong> vervallen posten open, verspreid over <strong>' . htmlspecialchars($debiteurenText, ENT_QUOTES, 'UTF-8') . '</strong> debiteuren, met een totaalwaarde van <strong>' . htmlspecialchars($totaalText, ENT_QUOTES, 'UTF-8') . '</strong>.</p>'
+            . '<p>U kunt deze rapportage ook zien op: <a href="https://sleutels.kvt.nl/mercurius/">Mercurius</a></p>'
+            . '<p>Met vriendelijke groet,<br><br>KVT Robot</p>'
+            . '</body></html>';
+
+        send_pdf_mail($reportMail, $recipients, $subject, $textBody, $pdfBinary, $pdfFilename, $htmlBody);
         $ok++;
         $recipientLines = array_map(
             static fn(string $email): string => '- ' . $email,
