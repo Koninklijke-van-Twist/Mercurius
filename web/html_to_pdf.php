@@ -23,6 +23,7 @@
  *
  * Gooit RuntimeException bij fouten.
  */
+
 function htmlToPdf(string $html, array $config = []): string
 {
     if (trim($html) === '') {

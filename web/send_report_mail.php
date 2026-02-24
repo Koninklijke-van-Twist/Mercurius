@@ -95,8 +95,8 @@ function fetch_report_html(string $company): string
     $mailQuery = [
         'company' => $company,
         'printfriendly' => 'true',
-        'filter' => 'all',
-        'open_filter' => 'both',
+        'filter' => 'overdue',
+        'open_filter' => 'open',
         'search' => '',
         'due_before' => '',
         'customer_no' => '',
@@ -306,6 +306,74 @@ function slugify_company(string $company): string
     return $slug !== '' ? $slug : 'bedrijf';
 }
 
+function parse_nl_amount(string $text): ?float
+{
+    $text = str_replace(["\xc2\xa0", ' '], '', trim($text));
+    if ($text === '') {
+        return null;
+    }
+
+    if (!preg_match('/-?\d{1,3}(?:\.\d{3})*,\d{2}|-?\d+,\d{2}|-?\d+/', $text, $matches)) {
+        return null;
+    }
+
+    $normalized = str_replace('.', '', $matches[0]);
+    $normalized = str_replace(',', '.', $normalized);
+
+    if (!is_numeric($normalized)) {
+        return null;
+    }
+
+    return (float) $normalized;
+}
+
+function extract_report_stats_from_html(string $html): array
+{
+    $dom = new DOMDocument('1.0', 'UTF-8');
+    libxml_use_internal_errors(true);
+    $wrappedHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' . $html . '</body></html>';
+    $dom->loadHTML($wrappedHtml, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+    libxml_clear_errors();
+
+    $xpath = new DOMXPath($dom);
+
+    $debiteurenCount = (int) $xpath->evaluate('count(//section[contains(concat(" ", normalize-space(@class), " "), " group ")])');
+    $rows = $xpath->query('//tbody/tr[not(contains(concat(" ", normalize-space(@class), " "), " total-row "))]');
+
+    $postenCount = 0;
+    $totaal = 0.0;
+
+    if ($rows !== false) {
+        foreach ($rows as $row) {
+            if (!($row instanceof DOMElement)) {
+                continue;
+            }
+
+            $amountCell = $xpath->query('.//td[@data-label="Verschuldigd"]', $row)->item(0);
+            if (!($amountCell instanceof DOMElement)) {
+                continue;
+            }
+
+            $postenCount++;
+            $parsedAmount = parse_nl_amount($amountCell->textContent);
+            if ($parsedAmount !== null) {
+                $totaal += $parsedAmount;
+            }
+        }
+    }
+
+    return [
+        'posten' => $postenCount,
+        'debiteuren' => $debiteurenCount,
+        'totaal' => $totaal,
+    ];
+}
+
+function format_eur_nl(float $amount): string
+{
+    return '€' . number_format($amount, 2, ',', '.');
+}
+
 function send_pdf_mail(array $reportMail, array $toEmails, string $subject, string $textBody, string $pdfBinary, string $pdfFilename): void
 {
     // Always use SMTP, never mail()
@@ -369,7 +437,15 @@ foreach ($recipientsByCompany as $company => $recipients) {
         $subject = $subjectPrefix . ' - ' . $company . ' - ' . $dateText;
         $pdfBinary = htmlToPdf($html, $reportMail);
         $pdfFilename = 'openstaande-posten-' . slugify_company((string) $company) . '-' . date('Ymd') . '.pdf';
-        $textBody = 'In de bijlage vindt u het rapport voor ' . $company . ' (' . $dateText . ').';
+        $stats = extract_report_stats_from_html($html);
+        $postenText = number_format((int) ($stats['posten'] ?? 0), 0, ',', '.');
+        $debiteurenText = number_format((int) ($stats['debiteuren'] ?? 0), 0, ',', '.');
+        $totaalText = format_eur_nl((float) ($stats['totaal'] ?? 0.0));
+        $textBody = "Beste collega,\n\n"
+            . "Bijgevoegd is de rapportage van vervallen posten.\n\n"
+            . "Er staan {$postenText} vervallen posten open, verspreid over {$debiteurenText} debiteuren, met een totaalwaarde van {$totaalText}.\nU kunt deze rapportage ook zien op: <a href=\"https://sleutels.kvt.nl/mercurius/\">Mercurius</a>\n"
+            . "Met vriendelijke groet,\n\n"
+            . "KVT Robot";
 
         send_pdf_mail($reportMail, $recipients, $subject, $textBody, $pdfBinary, $pdfFilename);
         $ok++;
