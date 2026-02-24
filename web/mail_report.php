@@ -24,6 +24,12 @@ foreach (array_keys($mailList ?? []) as $email) {
         $allUsers[] = $email;
     }
 }
+foreach (($globalMailRecipients ?? []) as $email) {
+    $email = trim((string) $email);
+    if ($email !== '') {
+        $allUsers[] = $email;
+    }
+}
 foreach (($allowedUsers ?? []) as $email) {
     $email = trim((string) $email);
     if ($email !== '') {
@@ -72,21 +78,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-function is_checked_for_company(string $company, string $email, array $mailList, array $submittedRecipientsByCompany): bool
+function is_default_for_company(string $company, string $email, array $mailList, array $globalRecipients): bool
+{
+    $defaultCompany = (string) ($mailList[$email] ?? '');
+    if ($defaultCompany === $company) {
+        return true;
+    }
+
+    return in_array($email, $globalRecipients, true);
+}
+
+function is_checked_for_company(string $company, string $email, array $mailList, array $globalRecipients, array $submittedRecipientsByCompany): bool
 {
     if (isset($submittedRecipientsByCompany[$company])) {
         return in_array($email, $submittedRecipientsByCompany[$company], true);
     }
 
-    $defaultCompany = (string) ($mailList[$email] ?? '');
-    return $defaultCompany === $company;
+    return is_default_for_company($company, $email, $mailList, $globalRecipients);
 }
 
-function sort_users_for_company(array $users, string $company, array $mailList): array
+function sort_users_for_company(array $users, string $company, array $mailList, array $globalRecipients): array
 {
-    usort($users, function (string $left, string $right) use ($company, $mailList): int {
-        $leftDefault = ((string) ($mailList[$left] ?? '')) === $company ? 1 : 0;
-        $rightDefault = ((string) ($mailList[$right] ?? '')) === $company ? 1 : 0;
+    usort($users, function (string $left, string $right) use ($company, $mailList, $globalRecipients): int {
+        $leftDefault = is_default_for_company($company, $left, $mailList, $globalRecipients) ? 1 : 0;
+        $rightDefault = is_default_for_company($company, $right, $mailList, $globalRecipients) ? 1 : 0;
 
         if ($leftDefault !== $rightDefault) {
             return $rightDefault <=> $leftDefault;
@@ -97,6 +112,8 @@ function sort_users_for_company(array $users, string $company, array $mailList):
 
     return $users;
 }
+
+$globalRecipients = normalize_recipients(is_array($globalMailRecipients ?? null) ? $globalMailRecipients : []);
 
 ?><!doctype html>
 <html lang="nl">
@@ -273,7 +290,7 @@ function sort_users_for_company(array $users, string $company, array $mailList):
             $lastSentAt = '';
             $lastSentBy = '';
             $lastRecipients = [];
-            $companyUsers = sort_users_for_company($allUsers, $company, $mailList);
+            $companyUsers = sort_users_for_company($allUsers, $company, $mailList, $globalRecipients);
             if (is_array($companyHistory)) {
                 $lastSentAtRaw = (string) ($companyHistory['last_sent_at'] ?? '');
                 $lastSentBy = (string) ($companyHistory['last_sent_by'] ?? '');
@@ -314,9 +331,9 @@ function sort_users_for_company(array $users, string $company, array $mailList):
                     <div class="user-list">
                         <?php foreach ($companyUsers as $email): ?>
                             <?php
-                            $checked = is_checked_for_company($company, $email, $mailList, $submittedRecipientsByCompany);
+                            $checked = is_checked_for_company($company, $email, $mailList, $globalRecipients, $submittedRecipientsByCompany);
                             $wasLastRecipient = in_array($email, $lastRecipients, true);
-                            $isDefaultForCompany = ((string) ($mailList[$email] ?? '')) === $company;
+                            $isDefaultForCompany = is_default_for_company($company, $email, $mailList, $globalRecipients);
                             ?>
                             <label class="user-item">
                                 <input type="checkbox" name="recipients[]" value="<?= htmlspecialchars($email) ?>" data-default="<?= $isDefaultForCompany ? '1' : '0' ?>" <?= $checked ? 'checked' : '' ?>>

@@ -53,9 +53,14 @@ if (!isset($reportMail) || !is_array($reportMail)) {
     exit(1);
 }
 
+$globalRecipients = [];
+if (isset($globalMailRecipients) && is_array($globalMailRecipients)) {
+    $globalRecipients = $globalMailRecipients;
+}
+
 $ok = 0;
 $failed = 0;
-$recipientsByCompany = group_recipients_by_company($mailList);
+$recipientsByCompany = group_recipients_by_company($mailList, $globalRecipients);
 
 foreach ($recipientsByCompany as $company => $recipients) {
     try {

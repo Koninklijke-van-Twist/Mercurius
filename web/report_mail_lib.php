@@ -34,9 +34,11 @@ function normalize_recipients(array $recipients): array
     return $normalized;
 }
 
-function group_recipients_by_company(array $mailList): array
+function group_recipients_by_company(array $mailList, array $globalRecipients = []): array
 {
     $recipientsByCompany = [];
+    $globalRecipients = normalize_recipients($globalRecipients);
+
     foreach ($mailList as $recipient => $company) {
         $recipient = trim((string) $recipient);
         $company = trim((string) $company);
@@ -52,7 +54,8 @@ function group_recipients_by_company(array $mailList): array
     }
 
     foreach ($recipientsByCompany as $company => $recipients) {
-        $recipientsByCompany[$company] = normalize_recipients($recipients);
+        $combinedRecipients = array_merge($recipients, $globalRecipients);
+        $recipientsByCompany[$company] = normalize_recipients($combinedRecipients);
     }
 
     return $recipientsByCompany;
