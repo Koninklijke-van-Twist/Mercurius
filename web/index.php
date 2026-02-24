@@ -342,9 +342,26 @@ if (isset($isMailReport) && $isMailReport) {
             color: var(--ink);
         }
 
+        .button-link {
+            display: inline-block;
+            font-size: 14px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid var(--line);
+            background: var(--panel);
+            color: var(--ink);
+            text-decoration: none;
+            line-height: normal;
+        }
+
         button {
             cursor: pointer;
             transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .button-link:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 14px rgba(0, 0, 0, 0.08);
         }
 
         button:hover {
@@ -674,6 +691,7 @@ if (isset($isMailReport) && $isMailReport) {
                     'label' => 'Cache',
                     'css' => '{{root}} .odata-cache-widget{top:-23px;left:auto;right:0px;} {{root}} .odata-cache-popout{top:64px;left:auto;right:20px;}'
                 ]) ?>
+                <a class="button-link" href="mail_report.php">Mailrapportage</a>
                 <label>
                     <select id="companySelect" name="company">
                         <?php foreach ($companies as $company): ?>

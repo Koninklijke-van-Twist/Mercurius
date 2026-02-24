@@ -53,6 +53,12 @@ function htmlToPdf(string $html, array $config = []): string
         '--disable-javascript',
         '--print-media-type',
         '--enable-local-file-access',
+        '--footer-right',
+        'Pagina [page] van [toPage]',
+        '--footer-font-size',
+        '9',
+        '--footer-spacing',
+        '4',
     ];
 
     $customOptions = $config['wkhtmltopdf_options'] ?? [];
