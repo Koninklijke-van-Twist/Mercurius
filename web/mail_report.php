@@ -3,6 +3,7 @@ require_once __DIR__ . '/functions.php';
 require __DIR__ . '/auth.php';
 require_once __DIR__ . '/logincheck.php';
 require_once __DIR__ . '/report_mail_lib.php';
+require_once __DIR__ . '/mail_recipients_db.php';
 
 $companies = [
     'Koninklijke van Twist',
@@ -10,44 +11,39 @@ $companies = [
     'KVT Gas',
 ];
 
-foreach (array_values($mailList ?? []) as $companyFromList) {
-    $companyFromList = trim((string) $companyFromList);
-    if ($companyFromList !== '' && !in_array($companyFromList, $companies, true)) {
-        $companies[] = $companyFromList;
-    }
-}
-
 $allUsers = [];
-foreach (array_keys($mailList ?? []) as $email) {
-    $email = trim((string) $email);
-    if ($email !== '') {
-        $allUsers[] = $email;
-    }
-}
-foreach (($globalMailRecipients ?? []) as $email) {
-    $email = trim((string) $email);
-    if ($email !== '') {
-        $allUsers[] = $email;
-    }
-}
-foreach (($allowedUsers ?? []) as $email) {
-    $email = trim((string) $email);
-    if ($email !== '') {
-        $allUsers[] = $email;
-    }
-}
+$recipientSettingsByEmail = [];
 $currentUserEmail = (string) ($_SESSION['user']['email'] ?? '');
-if ($currentUserEmail !== '') {
-    $allUsers[] = $currentUserEmail;
-}
-
-$allUsers = array_values(array_unique($allUsers));
-sort($allUsers, SORT_NATURAL | SORT_FLAG_CASE);
 
 $history = load_report_mail_history();
 
 $successMessage = '';
 $errorMessage = '';
+
+try {
+    initialize_report_mail_recipient_db(
+        is_array($defaultMailList ?? null) ? $defaultMailList : []
+    );
+
+    $recipientRows = get_report_mail_recipients();
+    foreach ($recipientRows as $row) {
+        $email = trim((string) ($row['email'] ?? ''));
+        if ($email === '') {
+            continue;
+        }
+
+        $allUsers[] = $email;
+        $recipientSettingsByEmail[strtolower($email)] = [
+            'kvt' => (int) ($row['kvt'] ?? 0),
+            'hvt' => (int) ($row['hvt'] ?? 0),
+            'gas' => (int) ($row['gas'] ?? 0),
+        ];
+    }
+} catch (Throwable $exception) {
+    $errorMessage = 'SQLite configuratie kon niet worden geladen: ' . $exception->getMessage();
+}
+
+sort($allUsers, SORT_NATURAL | SORT_FLAG_CASE);
 
 $submittedRecipientsByCompany = [];
 
@@ -78,30 +74,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-function is_default_for_company(string $company, string $email, array $mailList, array $globalRecipients): bool
+function is_default_for_company(string $company, string $email, array $recipientSettingsByEmail): bool
 {
-    $defaultCompany = (string) ($mailList[$email] ?? '');
-    if ($defaultCompany === $company) {
-        return true;
+    $column = report_mail_db_company_column($company);
+    if ($column === null) {
+        return false;
     }
 
-    return in_array($email, $globalRecipients, true);
+    $settings = $recipientSettingsByEmail[strtolower($email)] ?? null;
+    if (!is_array($settings)) {
+        return false;
+    }
+
+    return ((int) ($settings[$column] ?? 0)) === 1;
 }
 
-function is_checked_for_company(string $company, string $email, array $mailList, array $globalRecipients, array $submittedRecipientsByCompany): bool
+function is_checked_for_company(string $company, string $email, array $recipientSettingsByEmail, array $submittedRecipientsByCompany): bool
 {
     if (isset($submittedRecipientsByCompany[$company])) {
         return in_array($email, $submittedRecipientsByCompany[$company], true);
     }
 
-    return is_default_for_company($company, $email, $mailList, $globalRecipients);
+    return is_default_for_company($company, $email, $recipientSettingsByEmail);
 }
 
-function sort_users_for_company(array $users, string $company, array $mailList, array $globalRecipients): array
+function sort_users_for_company(array $users, string $company, array $recipientSettingsByEmail): array
 {
-    usort($users, function (string $left, string $right) use ($company, $mailList, $globalRecipients): int {
-        $leftDefault = is_default_for_company($company, $left, $mailList, $globalRecipients) ? 1 : 0;
-        $rightDefault = is_default_for_company($company, $right, $mailList, $globalRecipients) ? 1 : 0;
+    usort($users, function (string $left, string $right) use ($company, $recipientSettingsByEmail): int {
+        $leftDefault = is_default_for_company($company, $left, $recipientSettingsByEmail) ? 1 : 0;
+        $rightDefault = is_default_for_company($company, $right, $recipientSettingsByEmail) ? 1 : 0;
 
         if ($leftDefault !== $rightDefault) {
             return $rightDefault <=> $leftDefault;
@@ -112,8 +113,6 @@ function sort_users_for_company(array $users, string $company, array $mailList, 
 
     return $users;
 }
-
-$globalRecipients = normalize_recipients(is_array($globalMailRecipients ?? null) ? $globalMailRecipients : []);
 
 ?><!doctype html>
 <html lang="nl">
@@ -153,6 +152,12 @@ $globalRecipients = normalize_recipients(is_array($globalMailRecipients ?? null)
             gap: 12px;
             margin-bottom: 20px;
             flex-wrap: wrap;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
         }
 
         h1 {
@@ -272,7 +277,10 @@ $globalRecipients = normalize_recipients(is_array($globalMailRecipients ?? null)
 <body>
     <header>
         <h1>Mailrapportage</h1>
-        <a class="back-link" href="index.php">Terug naar overzicht</a>
+        <div class="header-actions">
+            <a class="back-link" href="mail_recipients.php">Ontvangers beheren</a>
+            <a class="back-link" href="index.php">Terug naar overzicht</a>
+        </div>
     </header>
 
     <?php if ($errorMessage !== ''): ?>
@@ -290,7 +298,7 @@ $globalRecipients = normalize_recipients(is_array($globalMailRecipients ?? null)
             $lastSentAt = '';
             $lastSentBy = '';
             $lastRecipients = [];
-            $companyUsers = sort_users_for_company($allUsers, $company, $mailList, $globalRecipients);
+            $companyUsers = sort_users_for_company($allUsers, $company, $recipientSettingsByEmail);
             if (is_array($companyHistory)) {
                 $lastSentAtRaw = (string) ($companyHistory['last_sent_at'] ?? '');
                 $lastSentBy = (string) ($companyHistory['last_sent_by'] ?? '');
@@ -331,12 +339,13 @@ $globalRecipients = normalize_recipients(is_array($globalMailRecipients ?? null)
                     <div class="user-list">
                         <?php foreach ($companyUsers as $email): ?>
                             <?php
-                            $checked = is_checked_for_company($company, $email, $mailList, $globalRecipients, $submittedRecipientsByCompany);
+                            $checked = is_checked_for_company($company, $email, $recipientSettingsByEmail, $submittedRecipientsByCompany);
                             $wasLastRecipient = in_array($email, $lastRecipients, true);
-                            $isDefaultForCompany = is_default_for_company($company, $email, $mailList, $globalRecipients);
+                            $isDefaultForCompany = is_default_for_company($company, $email, $recipientSettingsByEmail);
                             ?>
                             <label class="user-item">
-                                <input type="checkbox" name="recipients[]" value="<?= htmlspecialchars($email) ?>" data-default="<?= $isDefaultForCompany ? '1' : '0' ?>" <?= $checked ? 'checked' : '' ?>>
+                                <input type="checkbox" name="recipients[]" value="<?= htmlspecialchars($email) ?>"
+                                    data-default="<?= $isDefaultForCompany ? '1' : '0' ?>" <?= $checked ? 'checked' : '' ?>>
                                 <?= htmlspecialchars($email) ?>
                                 <?php if ($wasLastRecipient): ?>
                                     <span class="last-recipient-mark"

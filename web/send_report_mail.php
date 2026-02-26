@@ -5,6 +5,7 @@ error_reporting(E_ALL);
 
 require __DIR__ . '/auth.php';
 require_once __DIR__ . '/report_mail_lib.php';
+require_once __DIR__ . '/mail_recipients_db.php';
 
 $enforceScheduleGuard = true;
 $guardRequireMonday = true;
@@ -43,24 +44,32 @@ if ($enforceScheduleGuard) {
     }
 }
 
-if (!isset($mailList) || !is_array($mailList) || empty($mailList)) {
-    write_output('mailList is empty in auth.php', true);
-    exit(1);
-}
-
 if (!isset($reportMail) || !is_array($reportMail)) {
     write_output('reportMail is missing in auth.php', true);
     exit(1);
 }
 
-$globalRecipients = [];
-if (isset($globalMailRecipients) && is_array($globalMailRecipients)) {
-    $globalRecipients = $globalMailRecipients;
+$legacyMailList = is_array($defaultMailList ?? null) ? $defaultMailList : [];
+
+try {
+    initialize_report_mail_recipient_db($legacyMailList);
+} catch (Throwable $exception) {
+    write_output('SQLite configuratie kon niet worden geladen: ' . $exception->getMessage(), true);
+    exit(1);
 }
 
 $ok = 0;
 $failed = 0;
-$recipientsByCompany = group_recipients_by_company($mailList, $globalRecipients);
+$companies = [
+    'Koninklijke van Twist',
+    'Hunter van Twist',
+    'KVT Gas',
+];
+
+$recipientsByCompany = [];
+foreach ($companies as $company) {
+    $recipientsByCompany[$company] = normalize_recipients(get_report_mail_recipients_for_company($company));
+}
 
 foreach ($recipientsByCompany as $company => $recipients) {
     try {

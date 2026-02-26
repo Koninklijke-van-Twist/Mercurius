@@ -34,12 +34,12 @@ function normalize_recipients(array $recipients): array
     return $normalized;
 }
 
-function group_recipients_by_company(array $mailList, array $globalRecipients = []): array
+function group_recipients_by_company(array $defaultMailList, array $globalRecipients = []): array
 {
     $recipientsByCompany = [];
     $globalRecipients = normalize_recipients($globalRecipients);
 
-    foreach ($mailList as $recipient => $company) {
+    foreach ($defaultMailList as $recipient => $company) {
         $recipient = trim((string) $recipient);
         $company = trim((string) $company);
 
