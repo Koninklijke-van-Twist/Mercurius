@@ -220,7 +220,6 @@ function sort_users_for_company(array $users, string $company, array $recipientS
         .user-list {
             border: 1px solid #ebe4db;
             border-radius: 8px;
-            max-height: 240px;
             overflow: auto;
             padding: 8px 10px;
             margin-bottom: 12px;
