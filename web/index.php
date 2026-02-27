@@ -439,6 +439,12 @@ if (isset($isMailReport) && $isMailReport) {
             font-size: 12px;
         }
 
+        .customer-header>div {
+            min-width: 150px;
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+
         .customer-header span {
             color: var(--muted);
             font-weight: 500;
@@ -447,6 +453,8 @@ if (isset($isMailReport) && $isMailReport) {
         .customer-header a {
             color: var(--accent);
             text-decoration: none;
+            white-space: normal;
+            overflow-wrap: anywhere;
         }
 
         .memo-term {
@@ -639,6 +647,11 @@ if (isset($isMailReport) && $isMailReport) {
         @media (max-width: 900px) {
             body {
                 padding: 24px 14px 50px;
+            }
+
+            .customer-header>div {
+                min-width: 0;
+                flex-basis: 100%;
             }
 
             thead {

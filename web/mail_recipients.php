@@ -6,6 +6,7 @@ require_once __DIR__ . '/mail_recipients_db.php';
 
 $errorMessage = '';
 $successMessage = '';
+$isAjaxRequest = strtolower((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
 
 try {
     initialize_report_mail_recipient_db(
@@ -53,6 +54,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $errorMessage === '') {
         } else {
             $errorMessage = $exception->getMessage();
         }
+    }
+
+    if ($isAjaxRequest) {
+        http_response_code($errorMessage === '' ? 200 : 400);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'success' => $errorMessage === '',
+            'message' => $errorMessage === '' ? $successMessage : $errorMessage,
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
     }
 }
 
@@ -288,13 +299,16 @@ if ($errorMessage === '' || $_SERVER['REQUEST_METHOD'] !== 'POST') {
                         <tr>
                             <td class="email-cell"><?= htmlspecialchars($email) ?></td>
                             <td class="check-cols">
-                                <input type="checkbox" data-autosave="1" form="<?= htmlspecialchars($formId) ?>" name="kvt" value="1" <?= ((int) ($row['kvt'] ?? 0)) === 1 ? 'checked' : '' ?>>
+                                <input type="checkbox" data-autosave="1" form="<?= htmlspecialchars($formId) ?>" name="kvt"
+                                    value="1" <?= ((int) ($row['kvt'] ?? 0)) === 1 ? 'checked' : '' ?>>
                             </td>
                             <td class="check-cols">
-                                <input type="checkbox" data-autosave="1" form="<?= htmlspecialchars($formId) ?>" name="hvt" value="1" <?= ((int) ($row['hvt'] ?? 0)) === 1 ? 'checked' : '' ?>>
+                                <input type="checkbox" data-autosave="1" form="<?= htmlspecialchars($formId) ?>" name="hvt"
+                                    value="1" <?= ((int) ($row['hvt'] ?? 0)) === 1 ? 'checked' : '' ?>>
                             </td>
                             <td class="check-cols">
-                                <input type="checkbox" data-autosave="1" form="<?= htmlspecialchars($formId) ?>" name="gas" value="1" <?= ((int) ($row['gas'] ?? 0)) === 1 ? 'checked' : '' ?>>
+                                <input type="checkbox" data-autosave="1" form="<?= htmlspecialchars($formId) ?>" name="gas"
+                                    value="1" <?= ((int) ($row['gas'] ?? 0)) === 1 ? 'checked' : '' ?>>
                             </td>
                             <td>
                                 <div class="row-actions">
@@ -350,6 +364,7 @@ if ($errorMessage === '' || $_SERVER['REQUEST_METHOD'] !== 'POST') {
             const warning = document.getElementById('email-warning');
             const submitButton = document.getElementById('submit-add');
             const autoSaveCheckboxes = document.querySelectorAll('input[type="checkbox"][data-autosave="1"]');
+            const savingForms = new Set();
 
             const updateEmailWarning = () =>
             {
@@ -398,7 +413,7 @@ if ($errorMessage === '' || $_SERVER['REQUEST_METHOD'] !== 'POST') {
 
             autoSaveCheckboxes.forEach((checkbox) =>
             {
-                checkbox.addEventListener('change', () =>
+                checkbox.addEventListener('change', async () =>
                 {
                     const formId = checkbox.getAttribute('form');
                     if (!formId)
@@ -407,9 +422,69 @@ if ($errorMessage === '' || $_SERVER['REQUEST_METHOD'] !== 'POST') {
                     }
 
                     const form = document.getElementById(formId);
-                    if (form)
+                    if (!form)
                     {
-                        form.submit();
+                        return;
+                    }
+
+                    if (savingForms.has(formId))
+                    {
+                        checkbox.checked = !checkbox.checked;
+                        return;
+                    }
+
+                    const previousChecked = !checkbox.checked;
+                    const emailField = form.querySelector('input[name="email"]');
+                    if (!emailField)
+                    {
+                        checkbox.checked = previousChecked;
+                        return;
+                    }
+
+                    const rowCheckboxes = document.querySelectorAll('input[type="checkbox"][data-autosave="1"][form="' + formId + '"]');
+                    const formData = new FormData();
+                    formData.append('action', 'update');
+                    formData.append('email', emailField.value || '');
+
+                    rowCheckboxes.forEach((rowCheckbox) =>
+                    {
+                        rowCheckbox.disabled = true;
+                        if (rowCheckbox.checked)
+                        {
+                            formData.append(rowCheckbox.name, '1');
+                        }
+                    });
+
+                    savingForms.add(formId);
+
+                    try
+                    {
+                        const response = await fetch(window.location.href, {
+                            method: 'POST',
+                            headers: {
+                                'X-Requested-With': 'XMLHttpRequest'
+                            },
+                            body: formData
+                        });
+
+                        const payload = await response.json().catch(() => ({}));
+                        if (!response.ok || !payload.success)
+                        {
+                            throw new Error(payload.message || 'Opslaan van wijziging is mislukt.');
+                        }
+                    }
+                    catch (error)
+                    {
+                        checkbox.checked = previousChecked;
+                        alert(error && error.message ? error.message : 'Opslaan van wijziging is mislukt.');
+                    }
+                    finally
+                    {
+                        rowCheckboxes.forEach((rowCheckbox) =>
+                        {
+                            rowCheckbox.disabled = false;
+                        });
+                        savingForms.delete(formId);
                     }
                 });
             });
