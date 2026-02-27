@@ -439,13 +439,13 @@ if (isset($isMailReport) && $isMailReport) {
             font-size: 12px;
         }
 
-        .customer-header>div {
+        .customer-header>.customer-header-item {
             min-width: 150px;
             white-space: normal;
             overflow-wrap: anywhere;
         }
 
-        .customer-header span {
+        .customer-header .customer-header-label {
             color: var(--muted);
             font-weight: 500;
         }
@@ -649,7 +649,7 @@ if (isset($isMailReport) && $isMailReport) {
                 padding: 24px 14px 50px;
             }
 
-            .customer-header>div {
+            .customer-header>.customer-header-item {
                 min-width: 0;
                 flex-basis: 100%;
             }
@@ -772,21 +772,21 @@ if (isset($isMailReport) && $isMailReport) {
         <section class="group">
             <hr>
             <div class="customer-header">
-                <div>Debiteur: <a class="customer-no"
-                        href="<?= htmlspecialchars($customerLink) ?>"><?= htmlspecialchars($customerNoValue) ?></a>&nbsp;
-                </div>
-                <div><?= htmlspecialchars((string) ($customer['Name'] ?? '')) ?>&nbsp;</div>
-                <div><span>Woonplaats:</span> <?= htmlspecialchars((string) ($customer['City'] ?? '')) ?>&nbsp;</div>
-                <div>
-                    <span>Telefoon:</span>
+                <span class="customer-header-item">Debiteur: <a class="customer-no"
+                        href="<?= htmlspecialchars($customerLink) ?>\"><?= htmlspecialchars($customerNoValue) ?></a>&nbsp;
+                </span>
+                <span class="customer-header-item"><?= htmlspecialchars((string) ($customer['Name'] ?? '')) ?>&nbsp;</span>
+                <span class="customer-header-item"><span class="customer-header-label">Woonplaats:</span> <?= htmlspecialchars((string) ($customer['City'] ?? '')) ?>&nbsp;</span>
+                <span class="customer-header-item">
+                    <span class="customer-header-label">Telefoon:</span>
                     <?php if ($phoneLink): ?>
                         <a href="<?= htmlspecialchars($phoneLink) ?>"><?= htmlspecialchars($phone) ?></a>&nbsp;
                     <?php else: ?>
                         <span class="muted">n.v.t.</span>&nbsp;
                     <?php endif; ?>
-                </div>
-                <div>
-                    <span>Email:</span>
+                </span>
+                <span class="customer-header-item">
+                    <span class="customer-header-label">Email:</span>
                     <?php if ($mailLink): ?>
                         <a href="<?= htmlspecialchars($mailLink) ?>">
                             <?= strtolower(htmlspecialchars($email)) ?>&nbsp;
@@ -794,7 +794,7 @@ if (isset($isMailReport) && $isMailReport) {
                     <?php else: ?>
                         <span class="muted">n.v.t.</span>&nbsp;
                     <?php endif; ?>
-                </div>
+                </span>
             </div>
             <table>
                 <colgroup>
