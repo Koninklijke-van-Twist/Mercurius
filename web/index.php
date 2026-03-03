@@ -705,6 +705,7 @@ if (isset($isMailReport) && $isMailReport) {
                     'css' => '{{root}} .odata-cache-widget{top:-23px;left:auto;right:0px;} {{root}} .odata-cache-popout{top:64px;left:auto;right:20px;}'
                 ]) ?>
                 <a class="button-link" href="mail_report.php">Mailrapportage</a>
+                <a class="button-link" href="export.php?company=<?= urlencode($selectedCompany) ?>">CSV Export</a>
                 <label>
                     <select id="companySelect" name="company">
                         <?php foreach ($companies as $company): ?>
