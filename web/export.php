@@ -73,10 +73,10 @@ function csv_normalize_currency(string $value): string
 function csv_format_amount(?float $value): string
 {
     if ($value === null) {
-        return '0.00';
+        return '0,00';
     }
 
-    return number_format($value, 2, '.', '');
+    return number_format($value, 2, ',', '');
 }
 
 function csv_is_paid_row(array $row): bool
