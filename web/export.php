@@ -127,15 +127,9 @@ function csv_fetch_customers(string $selectedCompany, string $environment, array
             'Post_Code',
             'City',
             'Country_Region_Code',
-            'Country_Code',
-            'KVK_Nr',
-            'CoC_No',
-            'Chamber_of_Commerce_No',
-            'Registration_No',
+            'KVT_Chamber_Of_Commerce_No',
             'VAT_Registration_No',
-            'IBAN',
-            'IBAN_No',
-            'Bank_Account_No',
+            'Preferred_Bank_Account_Code',
         ]),
     ];
 
@@ -214,11 +208,8 @@ function csv_output(string $filename, array $headers, array $rows): void
     exit;
 }
 
-$download = trim((string) ($_GET['download'] ?? ''));
-
-if ($download === 'stambestand-debiteuren') {
-    $customers = csv_fetch_customers($selectedCompany, $environment, $auth);
-
+function csv_build_stambestand_rows(array $customers): array
+{
     $rows = [];
     foreach ($customers as $customer) {
         $address = trim(csv_string($customer, ['Address']));
@@ -234,21 +225,16 @@ if ($download === 'stambestand-debiteuren') {
             csv_string($customer, ['Post_Code']),
             csv_string($customer, ['City']),
             csv_string($customer, ['Country_Region_Code', 'Country_Code'], 'NL'),
-            csv_string($customer, ['KVK_Nr', 'CoC_No', 'Chamber_of_Commerce_No', 'Registration_No', 'VAT_Registration_No']),
-            csv_string($customer, ['IBAN', 'IBAN_No', 'Bank_Account_No']),
+            csv_string($customer, ['KVT_Chamber_Of_Commerce_No', 'KVK_Nr', 'CoC_No', 'Chamber_of_Commerce_No']),
+            csv_string($customer, ['Preferred_Bank_Account_Code', 'IBAN', 'IBAN_No', 'Bank_Account_No', 'VAT_Registration_No']),
         ];
     }
 
-    csv_output(
-        'Stambestand_Debiteuren.csv',
-        ['Deb.nr.', 'Naam', 'Adres', 'PC', 'Plaats', 'Land', 'KvK Nr.', 'Rek.nr.'],
-        $rows
-    );
+    return $rows;
 }
 
-if ($download === 'openstaande-facturen') {
-    $entries = csv_fetch_ledger_rows($selectedCompany, $environment, $auth, true);
-
+function csv_build_openstaande_rows(array $entries): array
+{
     $rows = [];
     foreach ($entries as $entry) {
         if (!csv_is_invoice_row($entry)) {
@@ -267,16 +253,11 @@ if ($download === 'openstaande-facturen') {
         ];
     }
 
-    csv_output(
-        'Openstaande_facturen.csv',
-        ['Debnr.', 'Fakt.nr.', 'Fakt.datum', 'Vervaldatum', 'Valuta', 'Bedrag'],
-        $rows
-    );
+    return $rows;
 }
 
-if ($download === 'betaalde-facturen') {
-    $entries = csv_fetch_ledger_rows($selectedCompany, $environment, $auth, false);
-
+function csv_build_betaalde_rows(array $entries): array
+{
     $rows = [];
     foreach ($entries as $entry) {
         if (!csv_is_invoice_row($entry) || !csv_is_paid_row($entry)) {
@@ -297,12 +278,56 @@ if ($download === 'betaalde-facturen') {
         ];
     }
 
+    return $rows;
+}
+
+$download = trim((string) ($_GET['download'] ?? ''));
+
+$stamHeaders = ['Deb.nr.', 'Naam', 'Adres', 'PC', 'Plaats', 'Land', 'KvK Nr.', 'Rek.nr.'];
+$openHeaders = ['Debnr.', 'Fakt.nr.', 'Fakt.datum', 'Vervaldatum', 'Valuta', 'Bedrag'];
+$paidHeaders = ['Debnr.', 'Fakt.nr.', 'Fakt.datum', 'Vervaldatum', 'Valuta', 'Bedrag', 'Datum betaald'];
+
+if ($download === 'stambestand-debiteuren') {
+    $customers = csv_fetch_customers($selectedCompany, $environment, $auth);
+    $rows = csv_build_stambestand_rows($customers);
+
     csv_output(
-        'Betaalde_facturen.csv',
-        ['Debnr.', 'Fakt.nr.', 'Fakt.datum', 'Vervaldatum', 'Valuta', 'Bedrag', 'Datum betaald'],
+        'Stambestand_Debiteuren.csv',
+        $stamHeaders,
         $rows
     );
 }
+
+if ($download === 'openstaande-facturen') {
+    $entries = csv_fetch_ledger_rows($selectedCompany, $environment, $auth, true);
+    $rows = csv_build_openstaande_rows($entries);
+
+    csv_output(
+        'Openstaande_facturen.csv',
+        $openHeaders,
+        $rows
+    );
+}
+
+if ($download === 'betaalde-facturen') {
+    $entries = csv_fetch_ledger_rows($selectedCompany, $environment, $auth, false);
+    $rows = csv_build_betaalde_rows($entries);
+
+    csv_output(
+        'Betaalde_facturen.csv',
+        $paidHeaders,
+        $rows
+    );
+}
+
+$stamRows = csv_build_stambestand_rows(csv_fetch_customers($selectedCompany, $environment, $auth));
+$openRows = csv_build_openstaande_rows(csv_fetch_ledger_rows($selectedCompany, $environment, $auth, true));
+$paidRows = csv_build_betaalde_rows(csv_fetch_ledger_rows($selectedCompany, $environment, $auth, false));
+
+$previewLimit = 50;
+$stamPreviewRows = array_slice($stamRows, 0, $previewLimit);
+$openPreviewRows = array_slice($openRows, 0, $previewLimit);
+$paidPreviewRows = array_slice($paidRows, 0, $previewLimit);
 ?><!doctype html>
 <html lang="nl">
 
@@ -414,6 +439,40 @@ if ($download === 'betaalde-facturen') {
             border-color: var(--accent);
             color: var(--accent);
         }
+
+        .preview {
+            margin-top: 12px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            overflow: auto;
+            background: #fcfaf7;
+        }
+
+        .preview table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .preview th,
+        .preview td {
+            padding: 6px 8px;
+            border-bottom: 1px solid #ebe4db;
+            text-align: left;
+            white-space: nowrap;
+        }
+
+        .preview thead th {
+            background: #f4efe8;
+            position: sticky;
+            top: 0;
+        }
+
+        .preview-more td {
+            text-align: center;
+            color: var(--muted);
+            font-weight: 700;
+        }
     </style>
 </head>
 
@@ -440,20 +499,103 @@ if ($download === 'betaalde-facturen') {
     <div class="cards">
         <section class="card">
             <h2>Stambestand Debiteuren</h2>
-            <p>Exporteert alle debiteuren met debiteurnummer, naam, adres, postcode, plaats, landcode, KvK nummer en rekeningnummer.</p>
-            <a class="export-button" href="export.php?company=<?= urlencode($selectedCompany) ?>&download=stambestand-debiteuren">Download CSV</a>
+            <p>Exporteert alle debiteuren met debiteurnummer, naam, adres, postcode, plaats, landcode, KvK nummer en
+                rekeningnummer.</p>
+            <a class="export-button"
+                href="export.php?company=<?= urlencode($selectedCompany) ?>&download=stambestand-debiteuren">Download
+                CSV</a>
+            <div class="preview">
+                <table>
+                    <thead>
+                        <tr>
+                            <?php foreach ($stamHeaders as $header): ?>
+                                <th><?= htmlspecialchars($header) ?></th>
+                            <?php endforeach; ?>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($stamPreviewRows as $row): ?>
+                            <tr>
+                                <?php foreach ($row as $cell): ?>
+                                    <td><?= htmlspecialchars((string) $cell) ?></td>
+                                <?php endforeach; ?>
+                            </tr>
+                        <?php endforeach; ?>
+                        <?php if (count($stamRows) > $previewLimit): ?>
+                            <tr class="preview-more">
+                                <td colspan="<?= count($stamHeaders) ?>">(Meer regels volgen in volledige export)</td>
+                            </tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
         </section>
 
         <section class="card">
             <h2>Openstaande facturen</h2>
-            <p>Exporteert alle openstaande facturen met debiteurnummer, factuurnummer, factuurdatum, vervaldatum, valuta en bedrag in factuurvaluta.</p>
-            <a class="export-button" href="export.php?company=<?= urlencode($selectedCompany) ?>&download=openstaande-facturen">Download CSV</a>
+            <p>Exporteert alle openstaande facturen met debiteurnummer, factuurnummer, factuurdatum, vervaldatum, valuta
+                en bedrag in factuurvaluta.</p>
+            <a class="export-button"
+                href="export.php?company=<?= urlencode($selectedCompany) ?>&download=openstaande-facturen">Download
+                CSV</a>
+            <div class="preview">
+                <table>
+                    <thead>
+                        <tr>
+                            <?php foreach ($openHeaders as $header): ?>
+                                <th><?= htmlspecialchars($header) ?></th>
+                            <?php endforeach; ?>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($openPreviewRows as $row): ?>
+                            <tr>
+                                <?php foreach ($row as $cell): ?>
+                                    <td><?= htmlspecialchars((string) $cell) ?></td>
+                                <?php endforeach; ?>
+                            </tr>
+                        <?php endforeach; ?>
+                        <?php if (count($openRows) > $previewLimit): ?>
+                            <tr class="preview-more">
+                                <td colspan="<?= count($openHeaders) ?>">(Meer regels volgen in volledige export)</td>
+                            </tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
         </section>
 
         <section class="card">
             <h2>Betaalde facturen</h2>
-            <p>Exporteert alle betaalde facturen met debiteurnummer, factuurnummer, factuurdatum, vervaldatum, valuta, bedrag in factuurvaluta en datum betaald.</p>
-            <a class="export-button" href="export.php?company=<?= urlencode($selectedCompany) ?>&download=betaalde-facturen">Download CSV</a>
+            <p>Exporteert alle betaalde facturen met debiteurnummer, factuurnummer, factuurdatum, vervaldatum, valuta,
+                bedrag in factuurvaluta en datum betaald.</p>
+            <a class="export-button"
+                href="export.php?company=<?= urlencode($selectedCompany) ?>&download=betaalde-facturen">Download CSV</a>
+            <div class="preview">
+                <table>
+                    <thead>
+                        <tr>
+                            <?php foreach ($paidHeaders as $header): ?>
+                                <th><?= htmlspecialchars($header) ?></th>
+                            <?php endforeach; ?>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($paidPreviewRows as $row): ?>
+                            <tr>
+                                <?php foreach ($row as $cell): ?>
+                                    <td><?= htmlspecialchars((string) $cell) ?></td>
+                                <?php endforeach; ?>
+                            </tr>
+                        <?php endforeach; ?>
+                        <?php if (count($paidRows) > $previewLimit): ?>
+                            <tr class="preview-more">
+                                <td colspan="<?= count($paidHeaders) ?>">(Meer regels volgen in volledige export)</td>
+                            </tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
         </section>
     </div>
 </body>
