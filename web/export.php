@@ -324,7 +324,7 @@ $stamRows = csv_build_stambestand_rows(csv_fetch_customers($selectedCompany, $en
 $openRows = csv_build_openstaande_rows(csv_fetch_ledger_rows($selectedCompany, $environment, $auth, true));
 $paidRows = csv_build_betaalde_rows(csv_fetch_ledger_rows($selectedCompany, $environment, $auth, false));
 
-$previewLimit = 50;
+$previewLimit = 15;
 $stamPreviewRows = array_slice($stamRows, 0, $previewLimit);
 $openPreviewRows = array_slice($openRows, 0, $previewLimit);
 $paidPreviewRows = array_slice($paidRows, 0, $previewLimit);
