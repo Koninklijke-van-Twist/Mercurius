@@ -568,6 +568,29 @@ if (isset($isMailReport) && $isMailReport) {
             color: var(--muted);
         }
 
+        .page-loader {
+            position: fixed;
+            inset: 0;
+            background: rgba(246, 243, 239, 0.92);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2500;
+        }
+
+        .page-loader.is-visible {
+            display: flex;
+        }
+
+        .page-loader__box {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 16px 20px;
+            font-size: 15px;
+            color: var(--ink);
+        }
+
         <?php if (!$isMailReport): ?>
             @media print {
 
@@ -693,6 +716,9 @@ if (isset($isMailReport) && $isMailReport) {
 </head>
 
 <body>
+    <div id="pageLoader" class="page-loader" aria-hidden="true">
+        <div class="page-loader__box">Exportpagina wordt geladen...</div>
+    </div>
     <header>
         <h1>Openstaande posten debiteuren - <span class="company-name"><?= $selectedCompany ?></span></h1>
         <div class="print-date">Datum: <?= htmlspecialchars($todayFormatted) ?></div>
@@ -705,7 +731,7 @@ if (isset($isMailReport) && $isMailReport) {
                     'css' => '{{root}} .odata-cache-widget{top:-23px;left:auto;right:0px;} {{root}} .odata-cache-popout{top:64px;left:auto;right:20px;}'
                 ]) ?>
                 <a class="button-link" href="mail_report.php">Mailrapportage</a>
-                <a class="button-link" href="export.php?company=<?= urlencode($selectedCompany) ?>">CSV Export</a>
+                <a id="csvExportLink" class="button-link" href="export.php?company=<?= urlencode($selectedCompany) ?>">CSV Export</a>
                 <label>
                     <select id="companySelect" name="company">
                         <?php foreach ($companies as $company): ?>
@@ -899,6 +925,30 @@ if (isset($isMailReport) && $isMailReport) {
             const customerSelect = document.getElementById('customerSelect');
             const dueBeforeInput = document.getElementById('dueBeforeInput');
             const filterAllButton = document.getElementById('filterAllButton');
+            const csvExportLink = document.getElementById('csvExportLink');
+            const pageLoader = document.getElementById('pageLoader');
+
+            function hidePageLoader ()
+            {
+                if (!pageLoader)
+                {
+                    return;
+                }
+                pageLoader.classList.remove('is-visible');
+                pageLoader.setAttribute('aria-hidden', 'true');
+                body.classList.remove('is-loading-navigation');
+            }
+
+            function showPageLoader ()
+            {
+                if (!pageLoader)
+                {
+                    return;
+                }
+                pageLoader.classList.add('is-visible');
+                pageLoader.setAttribute('aria-hidden', 'false');
+                body.classList.add('is-loading-navigation');
+            }
 
             function addHoverClass (element, className)
             {
@@ -992,6 +1042,19 @@ if (isset($isMailReport) && $isMailReport) {
             }
 
             updateAllButtonState();
+
+            if (csvExportLink)
+            {
+                csvExportLink.addEventListener('click', () =>
+                {
+                    showPageLoader();
+                });
+            }
+
+            window.addEventListener('pageshow', () =>
+            {
+                hidePageLoader();
+            });
         })();
     </script>
 <?php endif; ?>

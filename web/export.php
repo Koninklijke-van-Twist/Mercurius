@@ -146,20 +146,31 @@ function csv_fetch_customers(string $selectedCompany, string $environment, array
 function csv_fetch_ledger_rows(string $selectedCompany, string $environment, array $auth, bool $open): array
 {
     $selectFields = [
-        'Customer_No',
-        'Document_No',
+        'Entry_No',
+        'Posting_Date',
         'Document_Date',
-        'Due_Date',
+        'Document_No',
+        'Customer_No',
+        'Customer_Name',
+        'Description',
+        'Salesperson_Code',
+        'Global_Dimension_1_Code',
+        'Global_Dimension_2_Code',
         'Currency_Code',
+        'Remaining_Amt_LCY',
+        'Remaining_Amount',
+        'Due_Date',
+        'Closed_at_Date',
+        'External_Document_No',
+        'Your_Reference',
+        'Open',
+        'KVT_Memo',
         'Amount',
         'Original_Amount',
-        'Remaining_Amount',
-        'Open',
-        'Closed_at_Date',
-        'Description',
+        'Document_Type',
     ];
 
-    $filter = $open ? "Open eq true and Document_Type eq 'Invoice'" : "Open eq false and Document_Type eq 'Invoice'";
+    $filter = $open ? 'Open eq true' : 'Open eq false';
 
     $url = odata_company_url(
         $environment,
@@ -237,11 +248,10 @@ function csv_build_openstaande_rows(array $entries): array
 {
     $rows = [];
     foreach ($entries as $entry) {
-        if (!csv_is_invoice_row($entry)) {
+        $amount = pick_amount($entry);
+        if (abs($amount) < 0.00001) {
             continue;
         }
-
-        $amount = csv_number($entry, ['Remaining_Amount', 'Amount', 'Original_Amount']);
 
         $rows[] = [
             csv_string($entry, ['Customer_No']),
@@ -260,11 +270,16 @@ function csv_build_betaalde_rows(array $entries): array
 {
     $rows = [];
     foreach ($entries as $entry) {
-        if (!csv_is_invoice_row($entry) || !csv_is_paid_row($entry)) {
+        if (!csv_is_paid_row($entry)) {
             continue;
         }
 
-        $amount = csv_number($entry, ['Amount', 'Original_Amount', 'Remaining_Amount']);
+        $documentType = strtolower(csv_string($entry, ['Document_Type', 'document_type']));
+        if ($documentType !== '' && !in_array($documentType, ['invoice', 'factuur'], true)) {
+            continue;
+        }
+
+        $amount = csv_number($entry, ['Amount', 'Original_Amount', 'Remaining_Amount', 'Remaining_Amt_LCY']);
         $paidDate = csv_normalize_date(csv_string($entry, ['Closed_at_Date']));
 
         $rows[] = [
@@ -273,7 +288,7 @@ function csv_build_betaalde_rows(array $entries): array
             csv_normalize_date(csv_string($entry, ['Document_Date'])),
             csv_normalize_date(csv_string($entry, ['Due_Date'])),
             csv_normalize_currency(csv_string($entry, ['Currency_Code'])),
-            csv_format_amount($amount),
+            csv_format_amount($amount ?? 0.0),
             $paidDate,
         ];
     }
