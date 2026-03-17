@@ -183,7 +183,9 @@ function csv_fetch_ledger_rows(string $selectedCompany, string $environment, arr
     );
 
     try {
-        return odata_get_all($url, $auth, 600);
+        $entries = odata_get_all($url, $auth, 600);
+        sort_ledger_entries($entries);
+        return $entries;
     } catch (Throwable $e) {
         $fallbackFilter = $open ? 'Open eq true' : 'Open eq false';
         $fallbackUrl = odata_company_url(
@@ -195,7 +197,9 @@ function csv_fetch_ledger_rows(string $selectedCompany, string $environment, arr
                 '$filter' => $fallbackFilter,
             ]
         );
-        return odata_get_all($fallbackUrl, $auth, 600);
+        $entries = odata_get_all($fallbackUrl, $auth, 600);
+        sort_ledger_entries($entries);
+        return $entries;
     }
 }
 
@@ -246,26 +250,6 @@ function csv_build_stambestand_rows(array $customers): array
 
 function csv_build_openstaande_rows(array $entries): array
 {
-    usort($entries, static function (array $left, array $right): int {
-        $leftCustomerNo = (string) ($left['Customer_No'] ?? '');
-        $rightCustomerNo = (string) ($right['Customer_No'] ?? '');
-        $customerComparison = strnatcasecmp($leftCustomerNo, $rightCustomerNo);
-        if ($customerComparison !== 0) {
-            return $customerComparison;
-        }
-
-        $leftDateMade = (string) ($left['Document_Date'] ?? $left['Posting_Date'] ?? '');
-        $rightDateMade = (string) ($right['Document_Date'] ?? $right['Posting_Date'] ?? '');
-        $dateComparison = strcmp($leftDateMade, $rightDateMade);
-        if ($dateComparison !== 0) {
-            return $dateComparison;
-        }
-
-        $leftBkstNo = (string) ($left['Document_No'] ?? $left['Entry_No'] ?? '');
-        $rightBkstNo = (string) ($right['Document_No'] ?? $right['Entry_No'] ?? '');
-        return strnatcasecmp($leftBkstNo, $rightBkstNo);
-    });
-
     $rows = [];
     foreach ($entries as $entry) {
         $amount = pick_amount($entry);

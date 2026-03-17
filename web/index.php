@@ -99,6 +99,7 @@ $entriesUrl = odata_company_url(
 
 $customers = odata_get_all($customerUrl, $auth, 3600);
 $entries = odata_get_all($entriesUrl, $auth, 600);
+sort_ledger_entries($entries);
 
 $customerIndex = [];
 foreach ($customers as $customer) {
@@ -221,27 +222,7 @@ foreach ($entries as $entry) {
     $groups[$customerNo]['totals_by_currency'][$totalCurrency] += $amount;
 }
 
-uksort($groups, static function (string $a, string $b): int {
-    return strnatcasecmp($a, $b);
-});
-
-foreach ($groups as &$group) {
-    usort($group['entries'], static function (array $left, array $right): int {
-        $leftDate = (string) ($left['Document_Date'] ?? $left['Posting_Date'] ?? '');
-        $rightDate = (string) ($right['Document_Date'] ?? $right['Posting_Date'] ?? '');
-
-        $dateComparison = strcmp($leftDate, $rightDate);
-        if ($dateComparison !== 0) {
-            return $dateComparison;
-        }
-
-        $leftBkst = (string) ($left['Document_No'] ?? $left['Entry_No'] ?? '');
-        $rightBkst = (string) ($right['Document_No'] ?? $right['Entry_No'] ?? '');
-
-        return strnatcasecmp($leftBkst, $rightBkst);
-    });
-}
-unset($group);
+uksort($groups, 'compare_customer_no');
 
 $baseQueryParams = [
     'company' => $selectedCompany,

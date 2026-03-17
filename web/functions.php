@@ -24,6 +24,43 @@ function pick_amount(array $entry): float
     return 0.0;
 }
 
+function compare_customer_no(string $left, string $right): int
+{
+    return strnatcasecmp($left, $right);
+}
+
+function ledger_entry_date_made(array $entry): string
+{
+    return (string) ($entry['Document_Date'] ?? $entry['Posting_Date'] ?? '');
+}
+
+function ledger_entry_bkst_no(array $entry): string
+{
+    return (string) ($entry['Document_No'] ?? $entry['Entry_No'] ?? '');
+}
+
+function compare_ledger_entries(array $left, array $right): int
+{
+    $leftCustomerNo = (string) ($left['Customer_No'] ?? '');
+    $rightCustomerNo = (string) ($right['Customer_No'] ?? '');
+    $customerComparison = compare_customer_no($leftCustomerNo, $rightCustomerNo);
+    if ($customerComparison !== 0) {
+        return $customerComparison;
+    }
+
+    $dateComparison = strcmp(ledger_entry_date_made($left), ledger_entry_date_made($right));
+    if ($dateComparison !== 0) {
+        return $dateComparison;
+    }
+
+    return strnatcasecmp(ledger_entry_bkst_no($left), ledger_entry_bkst_no($right));
+}
+
+function sort_ledger_entries(array &$entries): void
+{
+    usort($entries, 'compare_ledger_entries');
+}
+
 function format_amount(float $amount): string
 {
     return number_format($amount, 2, ',', '.');
