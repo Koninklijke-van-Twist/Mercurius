@@ -718,7 +718,7 @@ if (isset($isMailReport) && $isMailReport) {
 
 <body>
     <div id="pageLoader" class="page-loader" aria-hidden="true">
-        <div class="page-loader__box">Exportpagina wordt geladen...</div>
+        <div class="page-loader__box">Pagina wordt geladen...</div>
     </div>
     <header>
         <h1>Openstaande posten debiteuren - <span class="company-name"><?= $selectedCompany ?></span></h1>
@@ -733,6 +733,7 @@ if (isset($isMailReport) && $isMailReport) {
                 ]) ?>
                 <a class="button-link" href="mail_report.php">Mailrapportage</a>
                 <a id="csvExportLink" class="button-link" href="export.php?company=<?= urlencode($selectedCompany) ?>">CSV Export</a>
+                <input id="filterInput" type="hidden" name="filter" value="<?= htmlspecialchars($filter) ?>" />
                 <label>
                     <select id="companySelect" name="company">
                         <?php foreach ($companies as $company): ?>
@@ -770,10 +771,10 @@ if (isset($isMailReport) && $isMailReport) {
                         <option value="both" <?= $openFilter === 'both' ? 'selected' : '' ?>>Beide</option>
                     </select>
                 </label>
-                <button id="filterAllButton" type="submit" name="filter" value="all"
+                <button id="filterAllButton" type="submit" data-filter-value="all"
                     class="<?= $filter === 'all' ? 'filter-active' : '' ?>">Alle
                     posten</button>
-                <button type="submit" name="filter" value="overdue"
+                <button id="filterOverdueButton" type="submit" data-filter-value="overdue"
                     class="<?= $filter === 'overdue' ? 'filter-active' : '' ?>">Vervallen posten</button>
             </form>
         <?php endif; ?>
@@ -922,10 +923,13 @@ if (isset($isMailReport) && $isMailReport) {
         (function ()
         {
             const body = document.body;
+            const controlsForm = document.querySelector('form.controls');
             const companySelect = document.getElementById('companySelect');
             const customerSelect = document.getElementById('customerSelect');
             const dueBeforeInput = document.getElementById('dueBeforeInput');
+            const filterInput = document.getElementById('filterInput');
             const filterAllButton = document.getElementById('filterAllButton');
+            const filterOverdueButton = document.getElementById('filterOverdueButton');
             const csvExportLink = document.getElementById('csvExportLink');
             const pageLoader = document.getElementById('pageLoader');
 
@@ -1044,6 +1048,40 @@ if (isset($isMailReport) && $isMailReport) {
 
             updateAllButtonState();
 
+            function setFilterValue (value)
+            {
+                if (!filterInput)
+                {
+                    return;
+                }
+                filterInput.value = value;
+            }
+
+            if (filterAllButton)
+            {
+                filterAllButton.addEventListener('click', () =>
+                {
+                    setFilterValue('all');
+                });
+            }
+
+            if (filterOverdueButton)
+            {
+                filterOverdueButton.addEventListener('click', () =>
+                {
+                    setFilterValue('overdue');
+                });
+            }
+
+            if (companySelect && controlsForm)
+            {
+                companySelect.addEventListener('change', () =>
+                {
+                    showPageLoader();
+                    controlsForm.requestSubmit();
+                });
+            }
+
             if (csvExportLink)
             {
                 csvExportLink.addEventListener('click', () =>
@@ -1053,6 +1091,11 @@ if (isset($isMailReport) && $isMailReport) {
             }
 
             window.addEventListener('pageshow', () =>
+            {
+                hidePageLoader();
+            });
+
+            window.addEventListener('popstate', () =>
             {
                 hidePageLoader();
             });
