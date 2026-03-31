@@ -213,10 +213,10 @@ function csv_output(string $filename, array $headers, array $rows): void
     echo "\xEF\xBB\xBF";
 
     $output = fopen('php://output', 'w');
-    fputcsv($output, $headers, ';');
+    fputcsv($output, $headers, ';', "\"", "\\", "\n");
 
     foreach ($rows as $row) {
-        fputcsv($output, $row, ';');
+        fputcsv($output, $row, ';', "\"", "\\", "\n");
     }
 
     fclose($output);
