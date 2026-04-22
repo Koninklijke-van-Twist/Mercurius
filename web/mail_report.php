@@ -367,7 +367,7 @@ function sort_users_for_company(array $users, string $company, array $recipientS
                     $attachmentSettings = $attachmentSettingsByCompany[$company] ?? report_mail_attachment_defaults();
                     ?>
 
-                    <fieldset class="user-list" style="margin-bottom:10px;">
+                    <fieldset class="user-list" style="margin-bottom:10px;" data-attachment-company="<?= htmlspecialchars($company) ?>">
                         <legend style="padding:0 4px; font-size:13px; color:var(--muted);">Bijlagen</legend>
                         <label class="user-item">
                             <input type="checkbox" name="attach_pdf_report" <?= ((int) ($attachmentSettings['pdf_report'] ?? 0)) === 1 ? 'checked' : '' ?>>
@@ -385,10 +385,6 @@ function sort_users_for_company(array $users, string $company, array $recipientS
                             <input type="checkbox" name="attach_csv_betaalde" <?= ((int) ($attachmentSettings['csv_betaalde'] ?? 0)) === 1 ? 'checked' : '' ?>>
                             CSV - Betaalde facturen
                         </label>
-
-                        <div class="user-select-actions" style="margin-top:8px;">
-                            <button type="submit" class="user-select-button" onclick="this.form.action.value='save_attachments';">Bijlagen opslaan</button>
-                        </div>
                     </fieldset>
 
                     <div class="user-select-actions">
@@ -470,6 +466,22 @@ function sort_users_for_company(array $users, string $company, array $recipientS
                 }
             });
         })();
+
+        // Auto-save attachment checkboxes on change
+        document.querySelectorAll('fieldset[data-attachment-company]').forEach((fieldset) => {
+            fieldset.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+                checkbox.addEventListener('change', () => {
+                    const company = fieldset.dataset.attachmentCompany;
+                    const data = new FormData();
+                    data.append('action', 'save_attachments');
+                    data.append('company', company);
+                    fieldset.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+                        if (cb.checked) data.append(cb.name, '1');
+                    });
+                    fetch('', { method: 'POST', body: data }).catch(() => {});
+                });
+            });
+        });
     </script>
 </body>
 
