@@ -1,8 +1,12 @@
 <?php
 require_once __DIR__ . '/functions.php';
 require __DIR__ . '/auth.php';
-require_once __DIR__ . '/logincheck.php';
 require_once __DIR__ . '/odata.php';
+
+$csvLibraryOnly = defined('MERCURIUS_EXPORT_LIB_ONLY') && MERCURIUS_EXPORT_LIB_ONLY;
+if (!$csvLibraryOnly) {
+    require_once __DIR__ . '/logincheck.php';
+}
 
 $companies = [
     'Koninklijke van Twist',
@@ -223,6 +227,87 @@ function csv_output(string $filename, array $headers, array $rows): void
     exit;
 }
 
+function csv_build_binary(array $headers, array $rows): string
+{
+    $output = fopen('php://temp', 'w+');
+    if ($output === false) {
+        throw new RuntimeException('Kon CSV outputbuffer niet openen');
+    }
+
+    fwrite($output, "\xEF\xBB\xBF");
+    fputcsv($output, $headers, ';', '"', '\\', "\n");
+
+    foreach ($rows as $row) {
+        fputcsv($output, $row, ';', '"', '\\', "\n");
+    }
+
+    rewind($output);
+    $csv = stream_get_contents($output);
+    fclose($output);
+
+    if ($csv === false) {
+        throw new RuntimeException('Kon CSV data niet lezen');
+    }
+
+    return $csv;
+}
+
+function csv_export_definitions(): array
+{
+    return [
+        'stambestand-debiteuren' => [
+            'filename' => 'Stambestand_Debiteuren.csv',
+            'headers' => ['Deb.nr.', 'Naam', 'Adres', 'PC', 'Plaats', 'Land', 'KvK Nr.', 'Rek.nr.'],
+        ],
+        'openstaande-facturen' => [
+            'filename' => 'Openstaande_facturen.csv',
+            'headers' => ['Debnr.', 'Fakt.nr.', 'Fakt.datum', 'Vervaldatum', 'Valuta', 'Bedrag'],
+        ],
+        'betaalde-facturen' => [
+            'filename' => 'Betaalde_facturen.csv',
+            'headers' => ['Debnr.', 'Fakt.nr.', 'Fakt.datum', 'Vervaldatum', 'Valuta', 'Bedrag', 'Datum betaald'],
+        ],
+    ];
+}
+
+function csv_get_export_payload(string $selectedCompany, string $download, string $environment, array $auth): array
+{
+    $definitions = csv_export_definitions();
+    if (!isset($definitions[$download])) {
+        throw new InvalidArgumentException('Onbekende export: ' . $download);
+    }
+
+    $headers = $definitions[$download]['headers'];
+    $filename = (string) $definitions[$download]['filename'];
+    $rows = [];
+
+    if ($download === 'stambestand-debiteuren') {
+        $rows = csv_build_stambestand_rows(csv_fetch_customers($selectedCompany, $environment, $auth));
+    } elseif ($download === 'openstaande-facturen') {
+        $rows = csv_build_openstaande_rows(csv_fetch_ledger_rows($selectedCompany, $environment, $auth, true));
+    } elseif ($download === 'betaalde-facturen') {
+        $rows = csv_build_betaalde_rows(csv_fetch_ledger_rows($selectedCompany, $environment, $auth, false));
+    }
+
+    return [
+        'filename' => $filename,
+        'headers' => $headers,
+        'rows' => $rows,
+    ];
+}
+
+function csv_get_export_attachment(string $selectedCompany, string $download, string $environment, array $auth): array
+{
+    $payload = csv_get_export_payload($selectedCompany, $download, $environment, $auth);
+    $binary = csv_build_binary($payload['headers'], $payload['rows']);
+
+    return [
+        'filename' => (string) $payload['filename'],
+        'mime' => 'text/csv; charset=UTF-8',
+        'content' => $binary,
+    ];
+}
+
 function csv_build_stambestand_rows(array $customers): array
 {
     $rows = [];
@@ -302,40 +387,42 @@ function csv_build_betaalde_rows(array $entries): array
 
 $download = trim((string) ($_GET['download'] ?? ''));
 
-$stamHeaders = ['Deb.nr.', 'Naam', 'Adres', 'PC', 'Plaats', 'Land', 'KvK Nr.', 'Rek.nr.'];
-$openHeaders = ['Debnr.', 'Fakt.nr.', 'Fakt.datum', 'Vervaldatum', 'Valuta', 'Bedrag'];
-$paidHeaders = ['Debnr.', 'Fakt.nr.', 'Fakt.datum', 'Vervaldatum', 'Valuta', 'Bedrag', 'Datum betaald'];
+$definitions = csv_export_definitions();
+$stamHeaders = $definitions['stambestand-debiteuren']['headers'];
+$openHeaders = $definitions['openstaande-facturen']['headers'];
+$paidHeaders = $definitions['betaalde-facturen']['headers'];
+
+if ($csvLibraryOnly) {
+    return;
+}
 
 if ($download === 'stambestand-debiteuren') {
-    $customers = csv_fetch_customers($selectedCompany, $environment, $auth);
-    $rows = csv_build_stambestand_rows($customers);
+    $payload = csv_get_export_payload($selectedCompany, $download, $environment, $auth);
 
     csv_output(
-        'Stambestand_Debiteuren.csv',
-        $stamHeaders,
-        $rows
+        (string) $payload['filename'],
+        $payload['headers'],
+        $payload['rows']
     );
 }
 
 if ($download === 'openstaande-facturen') {
-    $entries = csv_fetch_ledger_rows($selectedCompany, $environment, $auth, true);
-    $rows = csv_build_openstaande_rows($entries);
+    $payload = csv_get_export_payload($selectedCompany, $download, $environment, $auth);
 
     csv_output(
-        'Openstaande_facturen.csv',
-        $openHeaders,
-        $rows
+        (string) $payload['filename'],
+        $payload['headers'],
+        $payload['rows']
     );
 }
 
 if ($download === 'betaalde-facturen') {
-    $entries = csv_fetch_ledger_rows($selectedCompany, $environment, $auth, false);
-    $rows = csv_build_betaalde_rows($entries);
+    $payload = csv_get_export_payload($selectedCompany, $download, $environment, $auth);
 
     csv_output(
-        'Betaalde_facturen.csv',
-        $paidHeaders,
-        $rows
+        (string) $payload['filename'],
+        $payload['headers'],
+        $payload['rows']
     );
 }
 

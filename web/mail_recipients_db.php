@@ -21,6 +21,16 @@ function report_mail_db_company_column(string $company): ?string
     return null;
 }
 
+function report_mail_attachment_defaults(): array
+{
+    return [
+        'pdf_report' => 1,
+        'csv_stambestand' => 0,
+        'csv_openstaande' => 1,
+        'csv_betaalde' => 0,
+    ];
+}
+
 function report_mail_db_open(): PDO
 {
     $dbPath = report_mail_db_path();
@@ -42,12 +52,41 @@ function report_mail_db_open(): PDO
         )'
     );
 
+    $defaults = report_mail_attachment_defaults();
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS report_mail_attachments (
+            company TEXT PRIMARY KEY,
+            pdf_report INTEGER NOT NULL DEFAULT ' . (int) $defaults['pdf_report'] . ',
+            csv_stambestand INTEGER NOT NULL DEFAULT ' . (int) $defaults['csv_stambestand'] . ',
+            csv_openstaande INTEGER NOT NULL DEFAULT ' . (int) $defaults['csv_openstaande'] . ',
+            csv_betaalde INTEGER NOT NULL DEFAULT ' . (int) $defaults['csv_betaalde'] . '
+        )'
+    );
+
     return $pdo;
 }
 
 function initialize_report_mail_recipient_db(array $legacyMailList, array $legacyGlobalRecipients = []): void
 {
     $pdo = report_mail_db_open();
+
+    $attachmentDefaults = report_mail_attachment_defaults();
+    $attachmentStmt = $pdo->prepare(
+        'INSERT INTO report_mail_attachments (company, pdf_report, csv_stambestand, csv_openstaande, csv_betaalde)
+         VALUES (:company, :pdf_report, :csv_stambestand, :csv_openstaande, :csv_betaalde)
+         ON CONFLICT(company) DO NOTHING'
+    );
+
+    foreach (['Koninklijke van Twist', 'Hunter van Twist', 'KVT Gas'] as $company) {
+        $attachmentStmt->execute([
+            ':company' => $company,
+            ':pdf_report' => (int) $attachmentDefaults['pdf_report'],
+            ':csv_stambestand' => (int) $attachmentDefaults['csv_stambestand'],
+            ':csv_openstaande' => (int) $attachmentDefaults['csv_openstaande'],
+            ':csv_betaalde' => (int) $attachmentDefaults['csv_betaalde'],
+        ]);
+    }
+
     $count = (int) $pdo->query('SELECT COUNT(*) FROM report_mail_recipients')->fetchColumn();
     if ($count > 0) {
         return;
@@ -185,4 +224,65 @@ function delete_report_mail_recipient(string $email): void
     $pdo = report_mail_db_open();
     $stmt = $pdo->prepare('DELETE FROM report_mail_recipients WHERE email = :email');
     $stmt->execute([':email' => $email]);
+}
+
+function get_report_mail_attachments_for_company(string $company): array
+{
+    $defaults = report_mail_attachment_defaults();
+    if (report_mail_db_company_column($company) === null) {
+        return $defaults;
+    }
+
+    $pdo = report_mail_db_open();
+    $stmt = $pdo->prepare(
+        'SELECT pdf_report, csv_stambestand, csv_openstaande, csv_betaalde
+         FROM report_mail_attachments
+         WHERE company = :company'
+    );
+    $stmt->execute([':company' => $company]);
+    $row = $stmt->fetch();
+
+    if (!is_array($row)) {
+        set_report_mail_attachments_for_company(
+            $company,
+            (bool) $defaults['pdf_report'],
+            (bool) $defaults['csv_stambestand'],
+            (bool) $defaults['csv_openstaande'],
+            (bool) $defaults['csv_betaalde']
+        );
+        return $defaults;
+    }
+
+    return [
+        'pdf_report' => ((int) ($row['pdf_report'] ?? 0)) === 1 ? 1 : 0,
+        'csv_stambestand' => ((int) ($row['csv_stambestand'] ?? 0)) === 1 ? 1 : 0,
+        'csv_openstaande' => ((int) ($row['csv_openstaande'] ?? 0)) === 1 ? 1 : 0,
+        'csv_betaalde' => ((int) ($row['csv_betaalde'] ?? 0)) === 1 ? 1 : 0,
+    ];
+}
+
+function set_report_mail_attachments_for_company(string $company, bool $pdfReport, bool $csvStambestand, bool $csvOpenstaande, bool $csvBetaalde): void
+{
+    if (report_mail_db_company_column($company) === null) {
+        throw new InvalidArgumentException('Onbekend bedrijf voor bijlage-instellingen.');
+    }
+
+    $pdo = report_mail_db_open();
+    $stmt = $pdo->prepare(
+        'INSERT INTO report_mail_attachments (company, pdf_report, csv_stambestand, csv_openstaande, csv_betaalde)
+         VALUES (:company, :pdf_report, :csv_stambestand, :csv_openstaande, :csv_betaalde)
+         ON CONFLICT(company) DO UPDATE SET
+            pdf_report = excluded.pdf_report,
+            csv_stambestand = excluded.csv_stambestand,
+            csv_openstaande = excluded.csv_openstaande,
+            csv_betaalde = excluded.csv_betaalde'
+    );
+
+    $stmt->execute([
+        ':company' => $company,
+        ':pdf_report' => $pdfReport ? 1 : 0,
+        ':csv_stambestand' => $csvStambestand ? 1 : 0,
+        ':csv_openstaande' => $csvOpenstaande ? 1 : 0,
+        ':csv_betaalde' => $csvBetaalde ? 1 : 0,
+    ]);
 }

@@ -13,6 +13,7 @@ $companies = [
 
 $allUsers = [];
 $recipientSettingsByEmail = [];
+$attachmentSettingsByCompany = [];
 $currentUserEmail = (string) ($_SESSION['user']['email'] ?? '');
 
 $history = load_report_mail_history();
@@ -39,6 +40,10 @@ try {
             'gas' => (int) ($row['gas'] ?? 0),
         ];
     }
+
+    foreach ($companies as $company) {
+        $attachmentSettingsByCompany[$company] = get_report_mail_attachments_for_company($company);
+    }
 } catch (Throwable $exception) {
     $errorMessage = 'SQLite configuratie kon niet worden geladen: ' . $exception->getMessage();
 }
@@ -57,19 +62,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $submittedRecipientsByCompany[$company] = normalize_recipients($selectedRecipients);
 
-    if ($action !== 'send_company') {
+    $postedAttachmentSettings = [
+        'pdf_report' => isset($_POST['attach_pdf_report']),
+        'csv_stambestand' => isset($_POST['attach_csv_stambestand']),
+        'csv_openstaande' => isset($_POST['attach_csv_openstaande']),
+        'csv_betaalde' => isset($_POST['attach_csv_betaalde']),
+    ];
+
+    if (in_array($company, $companies, true)) {
+        $attachmentSettingsByCompany[$company] = [
+            'pdf_report' => $postedAttachmentSettings['pdf_report'] ? 1 : 0,
+            'csv_stambestand' => $postedAttachmentSettings['csv_stambestand'] ? 1 : 0,
+            'csv_openstaande' => $postedAttachmentSettings['csv_openstaande'] ? 1 : 0,
+            'csv_betaalde' => $postedAttachmentSettings['csv_betaalde'] ? 1 : 0,
+        ];
+    }
+
+    if ($action !== 'send_company' && $action !== 'save_attachments') {
         $errorMessage = 'Ongeldige actie.';
     } elseif (!in_array($company, $companies, true)) {
         $errorMessage = 'Ongeldig bedrijf geselecteerd.';
     } else {
         try {
-            $result = send_company_report($reportMail, $company, $selectedRecipients);
-            record_report_mail_history($company, $currentUserEmail !== '' ? $currentUserEmail : 'onbekend', $result['recipients']);
-            $history = load_report_mail_history();
-            $recipientCount = count($result['recipients']);
-            $successMessage = 'Mail verstuurd voor ' . $company . ' naar ' . $recipientCount . ' ontvanger(s).';
+            set_report_mail_attachments_for_company(
+                $company,
+                $postedAttachmentSettings['pdf_report'],
+                $postedAttachmentSettings['csv_stambestand'],
+                $postedAttachmentSettings['csv_openstaande'],
+                $postedAttachmentSettings['csv_betaalde']
+            );
+
+            if ($action === 'save_attachments') {
+                $successMessage = 'Bijlage-instellingen opgeslagen voor ' . $company . '.';
+            } else {
+                $result = send_company_report($reportMail, $company, $selectedRecipients, $postedAttachmentSettings);
+                record_report_mail_history($company, $currentUserEmail !== '' ? $currentUserEmail : 'onbekend', $result['recipients']);
+                $history = load_report_mail_history();
+                $recipientCount = count($result['recipients']);
+                $successMessage = 'Mail verstuurd voor ' . $company . ' naar ' . $recipientCount . ' ontvanger(s).';
+            }
         } catch (Throwable $exception) {
-            $errorMessage = 'Mail versturen mislukt voor ' . $company . ': ' . $exception->getMessage();
+            $errorMessage = ($action === 'save_attachments' ? 'Opslaan mislukt voor ' : 'Mail versturen mislukt voor ')
+                . $company . ': ' . $exception->getMessage();
         }
     }
 }
@@ -329,6 +363,34 @@ function sort_users_for_company(array $users, string $company, array $recipientS
                     <input type="hidden" name="action" value="send_company">
                     <input type="hidden" name="company" value="<?= htmlspecialchars($company) ?>">
 
+                    <?php
+                    $attachmentSettings = $attachmentSettingsByCompany[$company] ?? report_mail_attachment_defaults();
+                    ?>
+
+                    <fieldset class="user-list" style="margin-bottom:10px;">
+                        <legend style="padding:0 4px; font-size:13px; color:var(--muted);">Bijlagen</legend>
+                        <label class="user-item">
+                            <input type="checkbox" name="attach_pdf_report" <?= ((int) ($attachmentSettings['pdf_report'] ?? 0)) === 1 ? 'checked' : '' ?>>
+                            PDF rapportage
+                        </label>
+                        <label class="user-item">
+                            <input type="checkbox" name="attach_csv_stambestand" <?= ((int) ($attachmentSettings['csv_stambestand'] ?? 0)) === 1 ? 'checked' : '' ?>>
+                            CSV - Stambestand debiteuren
+                        </label>
+                        <label class="user-item">
+                            <input type="checkbox" name="attach_csv_openstaande" <?= ((int) ($attachmentSettings['csv_openstaande'] ?? 0)) === 1 ? 'checked' : '' ?>>
+                            CSV - Openstaande facturen
+                        </label>
+                        <label class="user-item">
+                            <input type="checkbox" name="attach_csv_betaalde" <?= ((int) ($attachmentSettings['csv_betaalde'] ?? 0)) === 1 ? 'checked' : '' ?>>
+                            CSV - Betaalde facturen
+                        </label>
+
+                        <div class="user-select-actions" style="margin-top:8px;">
+                            <button type="submit" class="user-select-button" onclick="this.form.action.value='save_attachments';">Bijlagen opslaan</button>
+                        </div>
+                    </fieldset>
+
                     <div class="user-select-actions">
                         <button type="button" class="user-select-button" data-select="all">Selecteer iedereen</button>
                         <button type="button" class="user-select-button" data-select="none">Selecteer niemand</button>
@@ -348,7 +410,7 @@ function sort_users_for_company(array $users, string $company, array $recipientS
                                 <?= htmlspecialchars($email) ?>
                                 <?php if ($wasLastRecipient): ?>
                                     <span class="last-recipient-mark"
-                                        title="Deze ontvanger heeft de vorige keer bij mailen de PDF ontvangen.">✓</span>
+                                        title="Deze ontvanger heeft de vorige keer deze rapportmail ontvangen.">✓</span>
                                 <?php endif; ?>
                             </label>
                         <?php endforeach; ?>

@@ -94,7 +94,7 @@ function smtp_command($socket, string $command, array $expectedCodes): string
     return $response;
 }
 
-function smtp_send_pdf_mail(array $reportMail, array $toEmails, string $subject, string $textBody, string $pdfBinary, string $pdfFilename, ?string $htmlBody = null): void
+function smtp_send_mail_with_attachments(array $reportMail, array $toEmails, string $subject, string $textBody, array $attachments, ?string $htmlBody = null): void
 {
     $smtp = $reportMail['smtp'] ?? [];
     $host = (string) ($smtp['host'] ?? '');
@@ -111,6 +111,10 @@ function smtp_send_pdf_mail(array $reportMail, array $toEmails, string $subject,
     $toEmails = normalize_recipients($toEmails);
     if (empty($toEmails)) {
         throw new RuntimeException('Recipient list is empty');
+    }
+
+    if (empty($attachments)) {
+        throw new RuntimeException('Attachment list is empty');
     }
 
     $transportHost = $encryption === 'ssl' ? 'ssl://' . $host : $host;
@@ -159,9 +163,6 @@ function smtp_send_pdf_mail(array $reportMail, array $toEmails, string $subject,
 
         $boundary = '=_Part_' . bin2hex(random_bytes(12));
         $altBoundary = '=_Alt_' . bin2hex(random_bytes(12));
-        $safeFilename = str_replace(["\r", "\n", '"'], ['', '', '_'], $pdfFilename);
-        $pdfBase64 = chunk_split(base64_encode($pdfBinary));
-
         $headers = [
             $fromHeader,
             'To: ' . implode(', ', array_map(static fn(string $email): string => '<' . $email . '>', $toEmails)),
@@ -190,13 +191,29 @@ function smtp_send_pdf_mail(array $reportMail, array $toEmails, string $subject,
         $messageBody =
             '--' . $boundary . "\r\n" .
             'Content-Type: multipart/alternative; boundary="' . $altBoundary . "\"\r\n\r\n" .
-            $textPart . "\r\n" .
-            '--' . $boundary . "\r\n" .
-            'Content-Type: application/pdf; name="' . $safeFilename . "\"\r\n" .
-            "Content-Transfer-Encoding: base64\r\n" .
-            'Content-Disposition: attachment; filename="' . $safeFilename . "\"\r\n\r\n" .
-            $pdfBase64 . "\r\n" .
-            '--' . $boundary . "--\r\n";
+            $textPart . "\r\n";
+
+        foreach ($attachments as $attachment) {
+            $filename = str_replace(["\r", "\n", '"'], ['', '', '_'], (string) ($attachment['filename'] ?? 'attachment.bin'));
+            $mimeType = trim((string) ($attachment['mime'] ?? 'application/octet-stream'));
+            if ($mimeType === '') {
+                $mimeType = 'application/octet-stream';
+            }
+
+            $content = (string) ($attachment['content'] ?? '');
+            if ($content === '') {
+                continue;
+            }
+
+            $messageBody .=
+                '--' . $boundary . "\r\n" .
+                'Content-Type: ' . $mimeType . '; name="' . $filename . "\"\r\n" .
+                "Content-Transfer-Encoding: base64\r\n" .
+                'Content-Disposition: attachment; filename="' . $filename . "\"\r\n\r\n" .
+                chunk_split(base64_encode($content)) . "\r\n";
+        }
+
+        $messageBody .= '--' . $boundary . "--\r\n";
 
         $message = implode("\r\n", $headers) . "\r\n\r\n" . $messageBody;
         $message = preg_replace("/(\r\n|\n|\r)/", "\r\n", $message);
@@ -215,7 +232,92 @@ function send_pdf_mail(array $reportMail, array $toEmails, string $subject, stri
     if (!isset($reportMail['smtp']) || !is_array($reportMail['smtp']) || empty($reportMail['smtp']['host'])) {
         throw new RuntimeException('SMTP config ontbreekt of is onvolledig in auth.php');
     }
-    smtp_send_pdf_mail($reportMail, $toEmails, $subject, $textBody, $pdfBinary, $pdfFilename, $htmlBody);
+
+    $attachments = [
+        [
+            'filename' => $pdfFilename,
+            'mime' => 'application/pdf',
+            'content' => $pdfBinary,
+        ],
+    ];
+
+    smtp_send_mail_with_attachments($reportMail, $toEmails, $subject, $textBody, $attachments, $htmlBody);
+}
+
+function report_attachment_defaults(): array
+{
+    return [
+        'pdf_report' => true,
+        'csv_stambestand' => false,
+        'csv_openstaande' => true,
+        'csv_betaalde' => false,
+    ];
+}
+
+function normalize_report_attachment_selection(array $attachmentSelection): array
+{
+    $defaults = report_attachment_defaults();
+    $normalized = $defaults;
+
+    foreach ($defaults as $key => $defaultValue) {
+        if (!array_key_exists($key, $attachmentSelection)) {
+            continue;
+        }
+
+        $value = $attachmentSelection[$key];
+        $normalized[$key] = $value === true || $value === 1 || $value === '1' || $value === 'on';
+    }
+
+    return $normalized;
+}
+
+function build_export_csv_attachment(string $company, string $download): array
+{
+    global $environment, $auth;
+
+    if (!isset($environment) || !is_string($environment) || trim($environment) === '') {
+        throw new RuntimeException('environment ontbreekt in auth.php');
+    }
+
+    if (!isset($auth) || !is_array($auth)) {
+        throw new RuntimeException('auth ontbreekt in auth.php');
+    }
+
+    if (!defined('MERCURIUS_EXPORT_LIB_ONLY')) {
+        define('MERCURIUS_EXPORT_LIB_ONLY', true);
+    }
+    require_once __DIR__ . '/export.php';
+
+    return csv_get_export_attachment($company, $download, $environment, $auth);
+}
+
+function build_report_mail_attachments(string $company, array $reportMail, string $html, array $attachmentSelection): array
+{
+    $selection = normalize_report_attachment_selection($attachmentSelection);
+    $attachments = [];
+
+    if ($selection['pdf_report']) {
+        $pdfBinary = htmlToPdf($html, $reportMail);
+        $attachments[] = [
+            'filename' => 'openstaande-posten-' . slugify_company($company) . '-' . date('Ymd') . '.pdf',
+            'mime' => 'application/pdf',
+            'content' => $pdfBinary,
+        ];
+    }
+
+    if ($selection['csv_stambestand']) {
+        $attachments[] = build_export_csv_attachment($company, 'stambestand-debiteuren');
+    }
+
+    if ($selection['csv_openstaande']) {
+        $attachments[] = build_export_csv_attachment($company, 'openstaande-facturen');
+    }
+
+    if ($selection['csv_betaalde']) {
+        $attachments[] = build_export_csv_attachment($company, 'betaalde-facturen');
+    }
+
+    return $attachments;
 }
 
 function fetch_report_html(string $company): string
@@ -383,7 +485,7 @@ function record_report_mail_history(string $company, string $sentBy, array $reci
     save_report_mail_history($history);
 }
 
-function send_company_report(array $reportMail, string $company, array $recipients): array
+function send_company_report(array $reportMail, string $company, array $recipients, array $attachmentSelection = []): array
 {
     $recipients = normalize_recipients($recipients);
     if (empty($recipients)) {
@@ -406,8 +508,19 @@ function send_company_report(array $reportMail, string $company, array $recipien
     $html = preg_replace('/<script\b[^>]*>.*?<\/script>/is', '', $html) ?? $html;
 
     $subject = $subjectPrefix . ' - ' . $company . ' - ' . $dateText;
-    $pdfBinary = htmlToPdf($html, $reportMail);
-    $pdfFilename = 'openstaande-posten-' . slugify_company((string) $company) . '-' . date('Ymd') . '.pdf';
+    $attachments = build_report_mail_attachments((string) $company, $reportMail, $html, $attachmentSelection);
+    if (empty($attachments)) {
+        throw new RuntimeException('Selecteer minimaal 1 bijlage om mee te sturen.');
+    }
+
+    $pdfFilename = '';
+    foreach ($attachments as $attachment) {
+        if (((string) ($attachment['mime'] ?? '')) === 'application/pdf') {
+            $pdfFilename = (string) ($attachment['filename'] ?? '');
+            break;
+        }
+    }
+
     $stats = extract_report_stats_from_html($html);
     $postenText = number_format((int) ($stats['posten'] ?? 0), 0, ',', '.');
     $debiteurenText = number_format((int) ($stats['debiteuren'] ?? 0), 0, ',', '.');
@@ -428,7 +541,7 @@ function send_company_report(array $reportMail, string $company, array $recipien
         . '<p>Met vriendelijke groet,<br><br>KVT Robot</p>'
         . '</body></html>';
 
-    send_pdf_mail($reportMail, $recipients, $subject, $textBody, $pdfBinary, $pdfFilename, $htmlBody);
+    smtp_send_mail_with_attachments($reportMail, $recipients, $subject, $textBody, $attachments, $htmlBody);
 
     return [
         'company' => $company,

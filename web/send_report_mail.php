@@ -77,7 +77,8 @@ foreach ($recipientsByCompany as $company => $recipients) {
             throw new RuntimeException('Geen geldige ontvangers voor bedrijf');
         }
 
-        send_company_report($reportMail, (string) $company, $recipients);
+        $attachmentSettings = get_report_mail_attachments_for_company((string) $company);
+        send_company_report($reportMail, (string) $company, $recipients, $attachmentSettings);
         record_report_mail_history((string) $company, 'batch@system', $recipients);
         $ok++;
         $recipientLines = array_map(
