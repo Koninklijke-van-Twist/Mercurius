@@ -385,6 +385,122 @@ function csv_build_betaalde_rows(array $entries): array
     return $rows;
 }
 
+function csv_build_rapport_rows(array $customers, array $entries): array
+{
+    $today = new DateTime('today');
+
+    $customerIndex = [];
+    foreach ($customers as $customer) {
+        $no = (string) ($customer['No'] ?? '');
+        if ($no !== '') {
+            $customerIndex[$no] = $customer;
+        }
+    }
+
+    $groups = [];
+    foreach ($entries as $entry) {
+        $amount = pick_amount($entry);
+        if (abs($amount) < 0.00001) {
+            continue;
+        }
+
+        $daysOverdue = 0;
+        if (!empty($entry['Due_Date'])) {
+            $dueDate = new DateTime($entry['Due_Date']);
+            if ($dueDate < $today) {
+                $daysOverdue = (int) $dueDate->diff($today)->format('%a');
+            }
+        }
+
+        if ($daysOverdue === 0) {
+            continue;
+        }
+
+        $customerNo = (string) ($entry['Customer_No'] ?? '');
+        if (!isset($groups[$customerNo])) {
+            $groups[$customerNo] = [
+                'customer' => $customerIndex[$customerNo] ?? [
+                    'No' => $customerNo,
+                    'Name' => (string) ($entry['Customer_Name'] ?? ''),
+                    'City' => '',
+                ],
+                'entries' => [],
+                'totals_by_currency' => [],
+            ];
+        }
+
+        $entry['_amount'] = $amount;
+        $entry['_days_overdue'] = $daysOverdue;
+        $entry['_currency_code'] = (string) ($entry['Currency_Code'] ?? '');
+        $groups[$customerNo]['entries'][] = $entry;
+
+        $currency = $entry['_currency_code'] !== '' ? $entry['_currency_code'] : 'EUR';
+        $groups[$customerNo]['totals_by_currency'][$currency] =
+            ($groups[$customerNo]['totals_by_currency'][$currency] ?? 0.0) + $amount;
+    }
+
+    uksort($groups, 'compare_customer_no');
+
+    $rows = [];
+    foreach ($groups as $customerNo => $group) {
+        $customer = $group['customer'];
+        $name = (string) ($customer['Name'] ?? '');
+        $city = (string) ($customer['City'] ?? '');
+
+        // Debtor header row
+        $rows[] = ['Debiteur', $customerNo, $name, $city, '', '', '', '', '', '', ''];
+
+        // Entry rows
+        foreach ($group['entries'] as $entry) {
+            $currencyCode = $entry['_currency_code'] !== '' ? $entry['_currency_code'] : 'EUR';
+            $dimensionParts = array_filter([
+                (string) ($entry['Salesperson_Code'] ?? ''),
+                (string) ($entry['Global_Dimension_1_Code'] ?? ''),
+                (string) ($entry['Global_Dimension_2_Code'] ?? ''),
+            ]);
+            $rows[] = [
+                'Post',
+                '',
+                '',
+                '',
+                csv_string($entry, ['Document_No', 'Entry_No']),
+                csv_normalize_date(csv_string($entry, ['Document_Date', 'Posting_Date'])),
+                csv_normalize_date(csv_string($entry, ['Due_Date'])),
+                $currencyCode . ' ' . csv_format_amount($entry['_amount']),
+                $entry['_days_overdue'] > 0 ? (string) $entry['_days_overdue'] : '',
+                csv_string($entry, ['Description']),
+                $dimensionParts ? implode(' / ', $dimensionParts) : '',
+                csv_string($entry, ['KVT_Memo']),
+            ];
+        }
+
+        // Total row
+        $totalParts = [];
+        foreach ($group['totals_by_currency'] as $code => $totalAmount) {
+            $totalParts[] = $code . ' ' . csv_format_amount($totalAmount);
+        }
+        $rows[] = ['Totaal', $customerNo, '', '', '', '', '', implode(' / ', $totalParts), '', '', '', ''];
+    }
+
+    return $rows;
+}
+
+function csv_build_rapport_attachment(string $selectedCompany, string $environment, array $auth): array
+{
+    $customers = csv_fetch_customers($selectedCompany, $environment, $auth);
+    $entries = csv_fetch_ledger_rows($selectedCompany, $environment, $auth, true);
+    $headers = ['Type', 'Debiteur nr', 'Naam', 'Woonplaats', 'Bkst nr', 'Datum gemaakt', 'Vervaldatum', 'Bedrag', 'Dgn', 'Omschrijving', 'Afdeling', 'Notities'];
+    $rows = csv_build_rapport_rows($customers, $entries);
+    $filename = 'Rapport_Openstaande_Posten_' . date('Ymd') . '.csv';
+    $binary = csv_build_binary($headers, $rows);
+
+    return [
+        'filename' => $filename,
+        'mime' => 'text/csv; charset=UTF-8',
+        'content' => $binary,
+    ];
+}
+
 $download = trim((string) ($_GET['download'] ?? ''));
 
 $definitions = csv_export_definitions();

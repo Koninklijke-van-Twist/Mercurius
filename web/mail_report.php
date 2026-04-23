@@ -64,6 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $postedAttachmentSettings = [
         'pdf_report' => isset($_POST['attach_pdf_report']),
+        'csv_rapport' => isset($_POST['attach_csv_rapport']),
         'csv_stambestand' => isset($_POST['attach_csv_stambestand']),
         'csv_openstaande' => isset($_POST['attach_csv_openstaande']),
         'csv_betaalde' => isset($_POST['attach_csv_betaalde']),
@@ -72,6 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (in_array($company, $companies, true)) {
         $attachmentSettingsByCompany[$company] = [
             'pdf_report' => $postedAttachmentSettings['pdf_report'] ? 1 : 0,
+            'csv_rapport' => $postedAttachmentSettings['csv_rapport'] ? 1 : 0,
             'csv_stambestand' => $postedAttachmentSettings['csv_stambestand'] ? 1 : 0,
             'csv_openstaande' => $postedAttachmentSettings['csv_openstaande'] ? 1 : 0,
             'csv_betaalde' => $postedAttachmentSettings['csv_betaalde'] ? 1 : 0,
@@ -87,6 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             set_report_mail_attachments_for_company(
                 $company,
                 $postedAttachmentSettings['pdf_report'],
+                $postedAttachmentSettings['csv_rapport'],
                 $postedAttachmentSettings['csv_stambestand'],
                 $postedAttachmentSettings['csv_openstaande'],
                 $postedAttachmentSettings['csv_betaalde']
@@ -367,11 +370,16 @@ function sort_users_for_company(array $users, string $company, array $recipientS
                     $attachmentSettings = $attachmentSettingsByCompany[$company] ?? report_mail_attachment_defaults();
                     ?>
 
-                    <fieldset class="user-list" style="margin-bottom:10px;" data-attachment-company="<?= htmlspecialchars($company) ?>">
+                    <fieldset class="user-list" style="margin-bottom:10px;"
+                        data-attachment-company="<?= htmlspecialchars($company) ?>">
                         <legend style="padding:0 4px; font-size:13px; color:var(--muted);">Bijlagen</legend>
                         <label class="user-item">
                             <input type="checkbox" name="attach_pdf_report" <?= ((int) ($attachmentSettings['pdf_report'] ?? 0)) === 1 ? 'checked' : '' ?>>
                             PDF rapportage
+                        </label>
+                        <label class="user-item">
+                            <input type="checkbox" name="attach_csv_rapport" <?= ((int) ($attachmentSettings['csv_rapport'] ?? 1)) === 1 ? 'checked' : '' ?>>
+                            CSV - Rapport openstaande posten
                         </label>
                         <label class="user-item">
                             <input type="checkbox" name="attach_csv_stambestand" <?= ((int) ($attachmentSettings['csv_stambestand'] ?? 0)) === 1 ? 'checked' : '' ?>>
@@ -468,17 +476,21 @@ function sort_users_for_company(array $users, string $company, array $recipientS
         })();
 
         // Auto-save attachment checkboxes on change
-        document.querySelectorAll('fieldset[data-attachment-company]').forEach((fieldset) => {
-            fieldset.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
-                checkbox.addEventListener('change', () => {
+        document.querySelectorAll('fieldset[data-attachment-company]').forEach((fieldset) =>
+        {
+            fieldset.querySelectorAll('input[type="checkbox"]').forEach((checkbox) =>
+            {
+                checkbox.addEventListener('change', () =>
+                {
                     const company = fieldset.dataset.attachmentCompany;
                     const data = new FormData();
                     data.append('action', 'save_attachments');
                     data.append('company', company);
-                    fieldset.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+                    fieldset.querySelectorAll('input[type="checkbox"]').forEach((cb) =>
+                    {
                         if (cb.checked) data.append(cb.name, '1');
                     });
-                    fetch('', { method: 'POST', body: data }).catch(() => {});
+                    fetch('', { method: 'POST', body: data }).catch(() => { });
                 });
             });
         });

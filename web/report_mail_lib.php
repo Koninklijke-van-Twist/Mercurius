@@ -248,6 +248,7 @@ function report_attachment_defaults(): array
 {
     return [
         'pdf_report' => true,
+        'csv_rapport' => true,
         'csv_stambestand' => false,
         'csv_openstaande' => true,
         'csv_betaalde' => false,
@@ -283,12 +284,29 @@ function build_export_csv_attachment(string $company, string $download): array
         throw new RuntimeException('auth ontbreekt in auth.php');
     }
 
+
+    if (!defined('MERCURIUS_EXPORT_LIB_ONLY')) {
+        define('MERCURIUS_EXPORT_LIB_ONLY', true);
+    }
+
+    // Save $download before require_once, because export.php sets $download = $_GET['download']
+    // at file scope which runs in this function's local scope and would overwrite the parameter.
+    $csvDownloadKey = $download;
+    require_once __DIR__ . '/export.php';
+
+    return csv_get_export_attachment($company, $csvDownloadKey, $environment, $auth);
+}
+
+function build_rapport_csv_attachment(string $company): array
+{
+    global $environment, $auth;
+
     if (!defined('MERCURIUS_EXPORT_LIB_ONLY')) {
         define('MERCURIUS_EXPORT_LIB_ONLY', true);
     }
     require_once __DIR__ . '/export.php';
 
-    return csv_get_export_attachment($company, $download, $environment, $auth);
+    return csv_build_rapport_attachment($company, $environment, $auth);
 }
 
 function build_report_mail_attachments(string $company, array $reportMail, string $html, array $attachmentSelection): array
@@ -303,6 +321,10 @@ function build_report_mail_attachments(string $company, array $reportMail, strin
             'mime' => 'application/pdf',
             'content' => $pdfBinary,
         ];
+    }
+
+    if ($selection['csv_rapport']) {
+        $attachments[] = build_rapport_csv_attachment((string) $company);
     }
 
     if ($selection['csv_stambestand']) {
