@@ -448,7 +448,8 @@ function csv_build_rapport_rows(array $customers, array $entries): array
         $city = (string) ($customer['City'] ?? '');
 
         // Debtor header row
-        $rows[] = ['Debiteur', $customerNo, $name, $city, '', '', '', '', '', '', ''];
+        $debtorRow = ['Debiteur', $customerNo, $name, $city, '', '', '', '', '', '', '', ''];
+        $rows[] = $debtorRow;
 
         // Entry rows
         foreach ($group['entries'] as $entry) {
@@ -458,7 +459,7 @@ function csv_build_rapport_rows(array $customers, array $entries): array
                 (string) ($entry['Global_Dimension_1_Code'] ?? ''),
                 (string) ($entry['Global_Dimension_2_Code'] ?? ''),
             ]);
-            $rows[] = [
+            $entryRow = [
                 'Post',
                 '',
                 '',
@@ -472,6 +473,18 @@ function csv_build_rapport_rows(array $customers, array $entries): array
                 $dimensionParts ? implode(' / ', $dimensionParts) : '',
                 csv_string($entry, ['KVT_Memo']),
             ];
+
+            foreach ($entryRow as $index => $value) {
+                if ($index === 0) {
+                    continue;
+                }
+
+                if ($value === '' && isset($debtorRow[$index]) && $debtorRow[$index] !== '') {
+                    $entryRow[$index] = $debtorRow[$index];
+                }
+            }
+
+            $rows[] = $entryRow;
         }
 
         // Total row
@@ -479,7 +492,18 @@ function csv_build_rapport_rows(array $customers, array $entries): array
         foreach ($group['totals_by_currency'] as $code => $totalAmount) {
             $totalParts[] = $code . ' ' . csv_format_amount($totalAmount);
         }
-        $rows[] = ['Totaal', $customerNo, '', '', '', '', '', implode(' / ', $totalParts), '', '', '', ''];
+        $totalRow = ['Totaal', $customerNo, '', '', '', '', '', implode(' / ', $totalParts), '', '', '', ''];
+        foreach ($totalRow as $index => $value) {
+            if ($index === 0) {
+                continue;
+            }
+
+            if ($value === '' && isset($debtorRow[$index]) && $debtorRow[$index] !== '') {
+                $totalRow[$index] = $debtorRow[$index];
+            }
+        }
+
+        $rows[] = $totalRow;
     }
 
     return $rows;
