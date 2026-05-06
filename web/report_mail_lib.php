@@ -274,15 +274,8 @@ function normalize_report_attachment_selection(array $attachmentSelection): arra
 
 function build_export_csv_attachment(string $company, string $download): array
 {
-    global $environment, $auth;
-
-    if (!isset($environment) || !is_string($environment) || trim($environment) === '') {
-        throw new RuntimeException('environment ontbreekt in auth.php');
-    }
-
-    if (!isset($auth) || !is_array($auth)) {
-        throw new RuntimeException('auth ontbreekt in auth.php');
-    }
+    $environment = getEnvironmentForCompany($company);
+    $auth = auth_get_for_environment($environment);
 
 
     if (!defined('MERCURIUS_EXPORT_LIB_ONLY')) {
@@ -299,7 +292,8 @@ function build_export_csv_attachment(string $company, string $download): array
 
 function build_rapport_csv_attachment(string $company): array
 {
-    global $environment, $auth;
+    $environment = getEnvironmentForCompany($company);
+    $auth = auth_get_for_environment($environment);
 
     if (!defined('MERCURIUS_EXPORT_LIB_ONLY')) {
         define('MERCURIUS_EXPORT_LIB_ONLY', true);

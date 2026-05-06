@@ -60,11 +60,17 @@ try {
 
 $ok = 0;
 $failed = 0;
-$companies = [
-    'Koninklijke van Twist',
-    'Hunter van Twist',
-    'KVT Gas',
-];
+
+try {
+    $companyDiscovery = auth_discover_companies();
+    $companies = $companyDiscovery['companies'];
+    if (empty($companies)) {
+        throw new RuntimeException('Geen bedrijven gevonden in de actieve environments.');
+    }
+} catch (Throwable $exception) {
+    write_output('Bedrijven ophalen mislukt: ' . $exception->getMessage(), true);
+    exit(1);
+}
 
 $recipientsByCompany = [];
 foreach ($companies as $company) {

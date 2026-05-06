@@ -87,9 +87,37 @@ function odata_get_json(string $url, array $auth): array
 
 function build_cache_key(string $url, array $auth): string
 {
-    require __DIR__ . "/auth.php";
     $user = (string) ($auth['user'] ?? '');
-    return $url . '|' . $user . '|' . $environment;
+
+    $environmentSignature = '';
+    if (function_exists('auth_environment_signature')) {
+        try {
+            $environmentSignature = auth_environment_signature();
+        } catch (Throwable $exception) {
+            $environmentSignature = '';
+        }
+    }
+
+    if ($environmentSignature === '') {
+        $raw = $GLOBALS['environments'] ?? ($GLOBALS['environment'] ?? '');
+        if (is_array($raw)) {
+            $parts = [];
+            foreach ($raw as $value) {
+                if (!is_scalar($value)) {
+                    continue;
+                }
+                $text = trim((string) $value);
+                if ($text !== '') {
+                    $parts[] = $text;
+                }
+            }
+            $environmentSignature = implode('|', array_values(array_unique($parts)));
+        } else {
+            $environmentSignature = trim((string) $raw);
+        }
+    }
+
+    return $url . '|' . $user . '|' . $environmentSignature;
 }
 
 function cache_base_dir(): string

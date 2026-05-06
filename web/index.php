@@ -12,15 +12,41 @@ require __DIR__ . "/auth.php";
 require_once __DIR__ . "/logincheck.php";
 require_once __DIR__ . "/odata.php";
 
-$companies = [
-    "Koninklijke van Twist",
-    "Hunter van Twist",
-    "KVT Gas",
-];
+$companyDiscoveryError = '';
+$companies = [];
+$companyEnvironmentMap = [];
+$selectedCompany = '';
+$selectedEnvironment = '';
+$auth = [];
 
-$selectedCompany = $_GET['company'] ?? $companies[0];
-if (!in_array($selectedCompany, $companies, true)) {
-    $selectedCompany = $companies[0];
+try {
+    $companyDiscovery = auth_discover_companies();
+    $companies = $companyDiscovery['companies'];
+    $companyEnvironmentMap = $companyDiscovery['companyEnvironmentMap'];
+
+    if (empty($companies)) {
+        throw new RuntimeException('Geen bedrijven gevonden in de actieve environments.');
+    }
+
+    $requestedCompany = trim((string) ($_GET['company'] ?? ''));
+    $sessionCompany = '';
+    if (isset($_SESSION) && is_array($_SESSION)) {
+        $sessionCompany = trim((string) ($_SESSION['selected_company'] ?? ''));
+    }
+
+    if ($requestedCompany !== '' && in_array($requestedCompany, $companies, true)) {
+        $selectedCompany = $requestedCompany;
+    } elseif ($sessionCompany !== '' && in_array($sessionCompany, $companies, true)) {
+        $selectedCompany = $sessionCompany;
+    } else {
+        $selectedCompany = $companies[0];
+    }
+
+    $selectedEnvironment = getEnvironmentForCompany($selectedCompany);
+    $auth = auth_get_for_environment($selectedEnvironment);
+    auth_store_selected_company_context($selectedCompany);
+} catch (Throwable $exception) {
+    $companyDiscoveryError = 'Bedrijven ophalen mislukt: ' . $exception->getMessage();
 }
 
 $filter = $_GET['filter'] ?? 'overdue';
@@ -45,15 +71,19 @@ $memoTooltipTerms = [
     'Z010' => 'Vooruitbetalen',
 ];
 
+$customers = [];
+$entries = [];
 
-$customerUrl = odata_company_url(
-    $environment,
-    $selectedCompany,
-    'AppCustomerCard',
-    [
-        '$select' => 'No,Name,City,E_Mail,Phone_No',
-    ]
-);
+if ($companyDiscoveryError === '') {
+    $customerUrl = odata_company_url(
+        $selectedEnvironment,
+        $selectedCompany,
+        'AppCustomerCard',
+        [
+            '$select' => 'No,Name,City,E_Mail,Phone_No',
+        ]
+    );
+}
 
 $entriesFilterParts = [];
 if ($openFilter === 'open') {
@@ -90,16 +120,18 @@ if (!empty($entriesFilterParts)) {
     $entriesParams['$filter'] = implode(' and ', $entriesFilterParts);
 }
 
-$entriesUrl = odata_company_url(
-    $environment,
-    $selectedCompany,
-    'Customer_Ledger_Entries',
-    $entriesParams
-);
+if ($companyDiscoveryError === '') {
+    $entriesUrl = odata_company_url(
+        $selectedEnvironment,
+        $selectedCompany,
+        'Customer_Ledger_Entries',
+        $entriesParams
+    );
 
-$customers = odata_get_all($customerUrl, $auth, 3600);
-$entries = odata_get_all($entriesUrl, $auth, 600);
-sort_ledger_entries($entries);
+    $customers = odata_get_all($customerUrl, $auth, 3600);
+    $entries = odata_get_all($entriesUrl, $auth, 600);
+    sort_ledger_entries($entries);
+}
 
 $customerIndex = [];
 foreach ($customers as $customer) {
@@ -721,9 +753,9 @@ if (isset($isMailReport) && $isMailReport) {
         <div class="page-loader__box">Pagina wordt geladen...</div>
     </div>
     <header>
-        <h1>Openstaande posten debiteuren - <span class="company-name"><?= $selectedCompany ?></span></h1>
+        <h1>Openstaande posten debiteuren - <span class="company-name\"><?= htmlspecialchars($selectedCompany !== '' ? $selectedCompany : 'Geen bedrijf') ?></span></h1>
         <div class="print-date">Datum: <?= htmlspecialchars($todayFormatted) ?></div>
-        <?php if (!$isMailReport): ?>
+        <?php if (!$isMailReport && $companyDiscoveryError === ''): ?>
             <form class="controls" method="get">
                 <?= injectTimerHtml([
                     'statusUrl' => 'odata.php?action=cache_status',
@@ -780,7 +812,14 @@ if (isset($isMailReport) && $isMailReport) {
         <?php endif; ?>
     </header>
 
-    <?php if (empty($groups)): ?>
+    <?php if ($companyDiscoveryError !== ''): ?>
+        <div class="group">
+            <hr>
+            <div class="empty" style="color:#b42318;font-weight:700;">Fout: <?= htmlspecialchars($companyDiscoveryError) ?></div>
+        </div>
+    <?php endif; ?>
+
+    <?php if ($companyDiscoveryError === '' && empty($groups)): ?>
         <div class="group">
             <hr>
             <div class="empty">Geen posten gevonden voor deze selectie.</div>
@@ -918,7 +957,7 @@ if (isset($isMailReport) && $isMailReport) {
 
 </body>
 
-<?php if (!$isMailReport): ?>
+<?php if (!$isMailReport && $companyDiscoveryError === ''): ?>
     <script>
         (function ()
         {

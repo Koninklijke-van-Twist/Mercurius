@@ -8,15 +8,40 @@ if (!$csvLibraryOnly) {
     require_once __DIR__ . '/logincheck.php';
 }
 
-$companies = [
-    'Koninklijke van Twist',
-    'Hunter van Twist',
-    'KVT Gas',
-];
+$companies = [];
+$selectedCompany = '';
+$selectedEnvironment = '';
+$selectedAuth = [];
+$exportContextError = '';
 
-$selectedCompany = $_GET['company'] ?? $companies[0];
-if (!in_array($selectedCompany, $companies, true)) {
-    $selectedCompany = $companies[0];
+if (!$csvLibraryOnly) {
+    try {
+        $companyDiscovery = auth_discover_companies();
+        $companies = $companyDiscovery['companies'];
+        if (empty($companies)) {
+            throw new RuntimeException('Geen bedrijven gevonden in de actieve environments.');
+        }
+
+        $requestedCompany = trim((string) ($_GET['company'] ?? ''));
+        $sessionCompany = '';
+        if (isset($_SESSION) && is_array($_SESSION)) {
+            $sessionCompany = trim((string) ($_SESSION['selected_company'] ?? ''));
+        }
+
+        if ($requestedCompany !== '' && in_array($requestedCompany, $companies, true)) {
+            $selectedCompany = $requestedCompany;
+        } elseif ($sessionCompany !== '' && in_array($sessionCompany, $companies, true)) {
+            $selectedCompany = $sessionCompany;
+        } else {
+            $selectedCompany = $companies[0];
+        }
+
+        $selectedEnvironment = getEnvironmentForCompany($selectedCompany);
+        $selectedAuth = auth_get_for_environment($selectedEnvironment);
+        auth_store_selected_company_context($selectedCompany);
+    } catch (Throwable $exception) {
+        $exportContextError = 'CSV export kon niet worden gestart: ' . $exception->getMessage();
+    }
 }
 
 function csv_string(array $row, array $keys, string $default = ''): string
@@ -536,8 +561,30 @@ if ($csvLibraryOnly) {
     return;
 }
 
+if ($exportContextError !== '') {
+    http_response_code(500);
+    ?>
+    <!doctype html>
+    <html lang="nl">
+
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>CSV Export fout</title>
+    </head>
+
+    <body>
+        <h1>CSV Export fout</h1>
+        <p><?= htmlspecialchars($exportContextError) ?></p>
+    </body>
+
+    </html>
+    <?php
+    exit;
+}
+
 if ($download === 'stambestand-debiteuren') {
-    $payload = csv_get_export_payload($selectedCompany, $download, $environment, $auth);
+    $payload = csv_get_export_payload($selectedCompany, $download, $selectedEnvironment, $selectedAuth);
 
     csv_output(
         (string) $payload['filename'],
@@ -547,7 +594,7 @@ if ($download === 'stambestand-debiteuren') {
 }
 
 if ($download === 'openstaande-facturen') {
-    $payload = csv_get_export_payload($selectedCompany, $download, $environment, $auth);
+    $payload = csv_get_export_payload($selectedCompany, $download, $selectedEnvironment, $selectedAuth);
 
     csv_output(
         (string) $payload['filename'],
@@ -557,7 +604,7 @@ if ($download === 'openstaande-facturen') {
 }
 
 if ($download === 'betaalde-facturen') {
-    $payload = csv_get_export_payload($selectedCompany, $download, $environment, $auth);
+    $payload = csv_get_export_payload($selectedCompany, $download, $selectedEnvironment, $selectedAuth);
 
     csv_output(
         (string) $payload['filename'],
@@ -566,9 +613,9 @@ if ($download === 'betaalde-facturen') {
     );
 }
 
-$stamRows = csv_build_stambestand_rows(csv_fetch_customers($selectedCompany, $environment, $auth));
-$openRows = csv_build_openstaande_rows(csv_fetch_ledger_rows($selectedCompany, $environment, $auth, true));
-$paidRows = csv_build_betaalde_rows(csv_fetch_ledger_rows($selectedCompany, $environment, $auth, false));
+$stamRows = csv_build_stambestand_rows(csv_fetch_customers($selectedCompany, $selectedEnvironment, $selectedAuth));
+$openRows = csv_build_openstaande_rows(csv_fetch_ledger_rows($selectedCompany, $selectedEnvironment, $selectedAuth, true));
+$paidRows = csv_build_betaalde_rows(csv_fetch_ledger_rows($selectedCompany, $selectedEnvironment, $selectedAuth, false));
 
 $previewLimit = 15;
 $stamPreviewRows = array_slice($stamRows, 0, $previewLimit);

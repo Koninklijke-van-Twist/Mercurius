@@ -5,11 +5,7 @@ require_once __DIR__ . '/logincheck.php';
 require_once __DIR__ . '/report_mail_lib.php';
 require_once __DIR__ . '/mail_recipients_db.php';
 
-$companies = [
-    'Koninklijke van Twist',
-    'Hunter van Twist',
-    'KVT Gas',
-];
+$companies = [];
 
 $allUsers = [];
 $recipientSettingsByEmail = [];
@@ -20,6 +16,16 @@ $history = load_report_mail_history();
 
 $successMessage = '';
 $errorMessage = '';
+
+try {
+    $companyDiscovery = auth_discover_companies();
+    $companies = $companyDiscovery['companies'];
+    if (empty($companies)) {
+        throw new RuntimeException('Geen bedrijven gevonden in de actieve environments.');
+    }
+} catch (Throwable $exception) {
+    $errorMessage = 'Bedrijven ophalen mislukt: ' . $exception->getMessage();
+}
 
 try {
     initialize_report_mail_recipient_db(
