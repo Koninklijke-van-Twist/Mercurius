@@ -44,6 +44,7 @@ try {
             'kvt' => (int) ($row['kvt'] ?? 0),
             'hvt' => (int) ($row['hvt'] ?? 0),
             'gas' => (int) ($row['gas'] ?? 0),
+            'germany' => (int) ($row['germany'] ?? 0),
         ];
     }
 

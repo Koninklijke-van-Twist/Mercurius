@@ -25,20 +25,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $errorMessage === '') {
             $kvt = isset($_POST['kvt']);
             $hvt = isset($_POST['hvt']);
             $gas = isset($_POST['gas']);
+            $germany = isset($_POST['germany']);
 
             if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
                 throw new InvalidArgumentException('Het e-mailadres lijkt niet geldig.');
             }
 
-            add_report_mail_recipient($email, $kvt, $hvt, $gas);
+            add_report_mail_recipient($email, $kvt, $hvt, $gas, $germany);
             $successMessage = 'Ontvanger toegevoegd.';
         } elseif ($action === 'update') {
             $email = trim((string) ($_POST['email'] ?? ''));
             $kvt = isset($_POST['kvt']);
             $hvt = isset($_POST['hvt']);
             $gas = isset($_POST['gas']);
+            $germany = isset($_POST['germany']);
 
-            update_report_mail_recipient_flags($email, $kvt, $hvt, $gas);
+            update_report_mail_recipient_flags($email, $kvt, $hvt, $gas, $germany);
             $successMessage = 'Ontvanger ' . $email . ' is bijgewerkt.';
         } elseif ($action === 'delete') {
             $email = trim((string) ($_POST['email'] ?? ''));
@@ -202,6 +204,11 @@ if ($errorMessage === '' || $_SERVER['REQUEST_METHOD'] !== 'POST') {
             text-align: center;
         }
 
+        .check-cols-wide {
+            width: 96px;
+            text-align: center;
+        }
+
         .email-cell {
             min-width: 260px;
         }
@@ -289,6 +296,7 @@ if ($errorMessage === '' || $_SERVER['REQUEST_METHOD'] !== 'POST') {
                         <th class="check-cols">KVT</th>
                         <th class="check-cols">HVT</th>
                         <th class="check-cols">Gas</th>
+                        <th class="check-cols-wide">Germany</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -309,6 +317,10 @@ if ($errorMessage === '' || $_SERVER['REQUEST_METHOD'] !== 'POST') {
                             <td class="check-cols">
                                 <input type="checkbox" data-autosave="1" form="<?= htmlspecialchars($formId) ?>" name="gas"
                                     value="1" <?= ((int) ($row['gas'] ?? 0)) === 1 ? 'checked' : '' ?>>
+                            </td>
+                            <td class="check-cols-wide">
+                                <input type="checkbox" data-autosave="1" form="<?= htmlspecialchars($formId) ?>" name="germany"
+                                    value="1" <?= ((int) ($row['germany'] ?? 0)) === 1 ? 'checked' : '' ?>>
                             </td>
                             <td>
                                 <div class="row-actions">
@@ -343,6 +355,7 @@ if ($errorMessage === '' || $_SERVER['REQUEST_METHOD'] !== 'POST') {
                 <label><input type="checkbox" name="kvt" value="1"> KVT</label>
                 <label><input type="checkbox" name="hvt" value="1"> HVT</label>
                 <label><input type="checkbox" name="gas" value="1"> Gas</label>
+                <label><input type="checkbox" name="germany" value="1"> KVT Germany</label>
             </div>
 
             <div class="warning" id="email-warning"></div>

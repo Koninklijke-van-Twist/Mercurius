@@ -17,6 +17,9 @@ function report_mail_db_company_column(string $company): ?string
     if ($normalized === 'KVT Gas') {
         return 'gas';
     }
+    if ($normalized === 'KVT Germany GmbH') {
+        return 'germany';
+    }
 
     return null;
 }
@@ -38,6 +41,7 @@ function report_mail_known_companies_for_defaults(): array
         'Koninklijke van Twist',
         'Hunter van Twist',
         'KVT Gas',
+        'KVT Germany GmbH',
     ];
 
     if (function_exists('auth_discover_companies')) {
@@ -87,7 +91,8 @@ function report_mail_db_open(): PDO
             email TEXT PRIMARY KEY,
             kvt INTEGER NOT NULL DEFAULT 0,
             hvt INTEGER NOT NULL DEFAULT 0,
-            gas INTEGER NOT NULL DEFAULT 0
+            gas INTEGER NOT NULL DEFAULT 0,
+            germany INTEGER NOT NULL DEFAULT 0
         )'
     );
 
@@ -106,6 +111,12 @@ function report_mail_db_open(): PDO
     // Migrate: add csv_rapport column if it does not exist yet (existing installs).
     try {
         $pdo->exec('ALTER TABLE report_mail_attachments ADD COLUMN csv_rapport INTEGER NOT NULL DEFAULT ' . (int) $defaults['csv_rapport']);
+    } catch (Throwable $e) {
+        // Column already exists; ignore.
+    }
+
+    try {
+        $pdo->exec('ALTER TABLE report_mail_recipients ADD COLUMN germany INTEGER NOT NULL DEFAULT 0');
     } catch (Throwable $e) {
         // Column already exists; ignore.
     }
@@ -166,7 +177,7 @@ function initialize_report_mail_recipient_db(array $legacyMailList, array $legac
         }
 
         if (!isset($seedByEmail[$email])) {
-            $seedByEmail[$email] = ['kvt' => 0, 'hvt' => 0, 'gas' => 0];
+            $seedByEmail[$email] = ['kvt' => 0, 'hvt' => 0, 'gas' => 0, 'germany' => 0];
         }
         $seedByEmail[$email][$column] = 1;
     }
@@ -176,12 +187,13 @@ function initialize_report_mail_recipient_db(array $legacyMailList, array $legac
     }
 
     $stmt = $pdo->prepare(
-        'INSERT INTO report_mail_recipients (email, kvt, hvt, gas)
-         VALUES (:email, :kvt, :hvt, :gas)
+        'INSERT INTO report_mail_recipients (email, kvt, hvt, gas, germany)
+         VALUES (:email, :kvt, :hvt, :gas, :germany)
          ON CONFLICT(email) DO UPDATE SET
             kvt = MAX(kvt, excluded.kvt),
             hvt = MAX(hvt, excluded.hvt),
-            gas = MAX(gas, excluded.gas)'
+            gas = MAX(gas, excluded.gas),
+            germany = MAX(germany, excluded.germany)'
     );
 
     foreach ($seedByEmail as $email => $flags) {
@@ -190,6 +202,7 @@ function initialize_report_mail_recipient_db(array $legacyMailList, array $legac
             ':kvt' => (int) $flags['kvt'],
             ':hvt' => (int) $flags['hvt'],
             ':gas' => (int) $flags['gas'],
+            ':germany' => (int) ($flags['germany'] ?? 0),
         ]);
     }
 }
@@ -197,7 +210,7 @@ function initialize_report_mail_recipient_db(array $legacyMailList, array $legac
 function get_report_mail_recipients(): array
 {
     $pdo = report_mail_db_open();
-    $stmt = $pdo->query('SELECT email, kvt, hvt, gas FROM report_mail_recipients ORDER BY email COLLATE NOCASE');
+    $stmt = $pdo->query('SELECT email, kvt, hvt, gas, germany FROM report_mail_recipients ORDER BY email COLLATE NOCASE');
     $rows = $stmt->fetchAll();
 
     return is_array($rows) ? $rows : [];
@@ -228,7 +241,7 @@ function get_report_mail_recipients_for_company(string $company): array
     return $emails;
 }
 
-function add_report_mail_recipient(string $email, bool $kvt, bool $hvt, bool $gas): void
+function add_report_mail_recipient(string $email, bool $kvt, bool $hvt, bool $gas, bool $germany = false): void
 {
     $email = strtolower(trim($email));
     if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
@@ -236,16 +249,17 @@ function add_report_mail_recipient(string $email, bool $kvt, bool $hvt, bool $ga
     }
 
     $pdo = report_mail_db_open();
-    $stmt = $pdo->prepare('INSERT INTO report_mail_recipients (email, kvt, hvt, gas) VALUES (:email, :kvt, :hvt, :gas)');
+    $stmt = $pdo->prepare('INSERT INTO report_mail_recipients (email, kvt, hvt, gas, germany) VALUES (:email, :kvt, :hvt, :gas, :germany)');
     $stmt->execute([
         ':email' => $email,
         ':kvt' => $kvt ? 1 : 0,
         ':hvt' => $hvt ? 1 : 0,
         ':gas' => $gas ? 1 : 0,
+        ':germany' => $germany ? 1 : 0,
     ]);
 }
 
-function update_report_mail_recipient_flags(string $email, bool $kvt, bool $hvt, bool $gas): void
+function update_report_mail_recipient_flags(string $email, bool $kvt, bool $hvt, bool $gas, bool $germany = false): void
 {
     $email = strtolower(trim($email));
     if ($email === '') {
@@ -253,12 +267,13 @@ function update_report_mail_recipient_flags(string $email, bool $kvt, bool $hvt,
     }
 
     $pdo = report_mail_db_open();
-    $stmt = $pdo->prepare('UPDATE report_mail_recipients SET kvt = :kvt, hvt = :hvt, gas = :gas WHERE email = :email');
+    $stmt = $pdo->prepare('UPDATE report_mail_recipients SET kvt = :kvt, hvt = :hvt, gas = :gas, germany = :germany WHERE email = :email');
     $stmt->execute([
         ':email' => $email,
         ':kvt' => $kvt ? 1 : 0,
         ':hvt' => $hvt ? 1 : 0,
         ':gas' => $gas ? 1 : 0,
+        ':germany' => $germany ? 1 : 0,
     ]);
 }
 
