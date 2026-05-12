@@ -274,10 +274,6 @@ function normalize_report_attachment_selection(array $attachmentSelection): arra
 
 function build_export_csv_attachment(string $company, string $download): array
 {
-    $environment = getEnvironmentForCompany($company);
-    $auth = auth_get_for_environment($environment);
-
-
     if (!defined('MERCURIUS_EXPORT_LIB_ONLY')) {
         define('MERCURIUS_EXPORT_LIB_ONLY', true);
     }
@@ -287,20 +283,23 @@ function build_export_csv_attachment(string $company, string $download): array
     $csvDownloadKey = $download;
     require_once __DIR__ . '/export.php';
 
-    return csv_get_export_attachment($company, $csvDownloadKey, $environment, $auth);
+    $companyEnvironment = getEnvironmentForCompany($company);
+    $auth = auth_get_for_environment($companyEnvironment);
+
+    return csv_get_export_attachment($company, $csvDownloadKey, $companyEnvironment, $auth);
 }
 
 function build_rapport_csv_attachment(string $company): array
 {
-    $environment = getEnvironmentForCompany($company);
-    $auth = auth_get_for_environment($environment);
-
     if (!defined('MERCURIUS_EXPORT_LIB_ONLY')) {
         define('MERCURIUS_EXPORT_LIB_ONLY', true);
     }
     require_once __DIR__ . '/export.php';
 
-    return csv_build_rapport_attachment($company, $environment, $auth);
+    $companyEnvironment = getEnvironmentForCompany($company);
+    $auth = auth_get_for_environment($companyEnvironment);
+
+    return csv_build_rapport_attachment($company, $companyEnvironment, $auth);
 }
 
 function build_report_mail_attachments(string $company, array $reportMail, string $html, array $attachmentSelection): array

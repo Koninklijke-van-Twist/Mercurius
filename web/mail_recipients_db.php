@@ -32,6 +32,44 @@ function report_mail_attachment_defaults(): array
     ];
 }
 
+function report_mail_known_companies_for_defaults(): array
+{
+    $companies = [
+        'Koninklijke van Twist',
+        'Hunter van Twist',
+        'KVT Gas',
+    ];
+
+    if (function_exists('auth_discover_companies')) {
+        try {
+            $discovery = auth_discover_companies();
+            $discoveredCompanies = $discovery['companies'] ?? [];
+            if (is_array($discoveredCompanies)) {
+                foreach ($discoveredCompanies as $company) {
+                    $companyName = trim((string) $company);
+                    if ($companyName === '') {
+                        continue;
+                    }
+                    $companies[] = $companyName;
+                }
+            }
+        } catch (Throwable $e) {
+            // Keep legacy defaults when discovery is temporarily unavailable.
+        }
+    }
+
+    $normalized = [];
+    foreach ($companies as $company) {
+        $companyName = trim((string) $company);
+        if ($companyName === '') {
+            continue;
+        }
+        $normalized[$companyName] = true;
+    }
+
+    return array_keys($normalized);
+}
+
 function report_mail_db_open(): PDO
 {
     $dbPath = report_mail_db_path();
@@ -86,7 +124,7 @@ function initialize_report_mail_recipient_db(array $legacyMailList, array $legac
          ON CONFLICT(company) DO NOTHING'
     );
 
-    foreach (['Koninklijke van Twist', 'Hunter van Twist', 'KVT Gas'] as $company) {
+    foreach (report_mail_known_companies_for_defaults() as $company) {
         $attachmentStmt->execute([
             ':company' => $company,
             ':pdf_report' => (int) $attachmentDefaults['pdf_report'],
@@ -239,7 +277,7 @@ function delete_report_mail_recipient(string $email): void
 function get_report_mail_attachments_for_company(string $company): array
 {
     $defaults = report_mail_attachment_defaults();
-    if (report_mail_db_company_column($company) === null) {
+    if (trim($company) === '') {
         return $defaults;
     }
 
@@ -275,8 +313,9 @@ function get_report_mail_attachments_for_company(string $company): array
 
 function set_report_mail_attachments_for_company(string $company, bool $pdfReport, bool $csvRapport, bool $csvStambestand, bool $csvOpenstaande, bool $csvBetaalde): void
 {
-    if (report_mail_db_company_column($company) === null) {
-        throw new InvalidArgumentException('Onbekend bedrijf voor bijlage-instellingen.');
+    $company = trim($company);
+    if ($company === '') {
+        throw new InvalidArgumentException('Bedrijfsnaam voor bijlage-instellingen ontbreekt.');
     }
 
     $pdo = report_mail_db_open();

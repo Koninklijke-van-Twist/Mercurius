@@ -86,6 +86,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ];
     }
 
+    if ($action === 'send_company') {
+        @ini_set('max_execution_time', '3600');
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(3600);
+        }
+    }
+
     if ($action !== 'send_company' && $action !== 'save_attachments') {
         $errorMessage = 'Ongeldige actie.';
     } elseif (!in_array($company, $companies, true)) {
@@ -299,6 +306,87 @@ function sort_users_for_company(array $users, string $company, array $recipientS
             justify-content: flex-end;
         }
 
+        .sending-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(31, 42, 46, 0.72);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 18px;
+        }
+
+        .sending-overlay.active {
+            display: flex;
+        }
+
+        .sending-panel {
+            width: min(760px, 100%);
+            max-height: 88vh;
+            overflow: auto;
+            background: #fff;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 18px 18px 14px;
+            box-shadow: 0 20px 42px rgba(0, 0, 0, 0.22);
+        }
+
+        .sending-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .sending-spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid #d8e0e6;
+            border-top-color: var(--accent);
+            border-radius: 999px;
+            animation: spin 1s linear infinite;
+            flex: 0 0 auto;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .sending-title {
+            margin: 0;
+            font-size: 18px;
+        }
+
+        .sending-subtitle {
+            margin: 0;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .sending-summary {
+            margin-top: 8px;
+            border-top: 1px solid var(--line);
+            padding-top: 12px;
+            font-size: 14px;
+        }
+
+        .sending-summary strong {
+            display: inline-block;
+            min-width: 88px;
+        }
+
+        .sending-list {
+            margin: 6px 0 12px;
+            padding-left: 18px;
+        }
+
+        .sending-list li {
+            margin: 2px 0;
+        }
+
         button {
             font-size: 14px;
             padding: 8px 12px;
@@ -434,10 +522,90 @@ function sort_users_for_company(array $users, string $company, array $recipientS
         <?php endforeach; ?>
     </div>
 
+    <div class="sending-overlay" id="sending-overlay" aria-live="polite" aria-busy="true">
+        <div class="sending-panel">
+            <div class="sending-header">
+                <span class="sending-spinner" aria-hidden="true"></span>
+                <div>
+                    <h3 class="sending-title">Mail wordt verstuurd...</h3>
+                    <p class="sending-subtitle">Dit kan even duren bij meerdere CSV-bijlagen. Sluit dit venster niet.</p>
+                </div>
+            </div>
+            <div class="sending-summary" id="sending-summary"></div>
+        </div>
+    </div>
+
     <script>
         (function ()
         {
             const forms = document.querySelectorAll('.card form');
+            const sendingOverlay = document.getElementById('sending-overlay');
+            const sendingSummary = document.getElementById('sending-summary');
+
+            function escapeHtml(value)
+            {
+                const text = String(value ?? '');
+                return text
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
+            }
+
+            function selectedRecipientValues(form)
+            {
+                return Array.from(form.querySelectorAll('input[type="checkbox"][name="recipients[]"]:checked'))
+                    .map((checkbox) => checkbox.value)
+                    .filter(Boolean);
+            }
+
+            function selectedAttachmentLabels(form)
+            {
+                return Array.from(form.querySelectorAll('fieldset[data-attachment-company] label'))
+                    .map((label) =>
+                    {
+                        const checkbox = label.querySelector('input[type="checkbox"]');
+                        if (!checkbox || !checkbox.checked)
+                        {
+                            return '';
+                        }
+
+                        return label.textContent.replace(/\s+/g, ' ').trim();
+                    })
+                    .filter(Boolean);
+            }
+
+            function renderList(items)
+            {
+                if (items.length === 0)
+                {
+                    return '<p>- geen -</p>';
+                }
+
+                return '<ul class="sending-list">' + items.map((item) => '<li>' + escapeHtml(item) + '</li>').join('') + '</ul>';
+            }
+
+            function showSendingOverlay(form)
+            {
+                if (!sendingOverlay || !sendingSummary)
+                {
+                    return;
+                }
+
+                const company = (form.querySelector('input[name="company"]')?.value || '').trim();
+                const recipients = selectedRecipientValues(form);
+                const attachments = selectedAttachmentLabels(form);
+
+                sendingSummary.innerHTML =
+                    '<p><strong>Bedrijf:</strong> ' + escapeHtml(company || '-') + '</p>'
+                    + '<p><strong>Bijlagen:</strong></p>'
+                    + renderList(attachments)
+                    + '<p><strong>Ontvangers (' + recipients.length + '):</strong></p>'
+                    + renderList(recipients);
+
+                sendingOverlay.classList.add('active');
+            }
 
             forms.forEach((form) =>
             {
@@ -445,6 +613,7 @@ function sort_users_for_company(array $users, string $company, array $recipientS
                 const selectAllButton = form.querySelector('button[data-select="all"]');
                 const selectNoneButton = form.querySelector('button[data-select="none"]');
                 const selectDefaultButton = form.querySelector('button[data-select="default"]');
+                const actionField = form.querySelector('input[name="action"]');
 
                 if (selectAllButton)
                 {
@@ -478,6 +647,16 @@ function sort_users_for_company(array $users, string $company, array $recipientS
                         });
                     });
                 }
+
+                form.addEventListener('submit', () =>
+                {
+                    if ((actionField?.value || '') !== 'send_company')
+                    {
+                        return;
+                    }
+
+                    showSendingOverlay(form);
+                });
             });
         })();
 
