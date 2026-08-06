@@ -145,8 +145,11 @@ function csv_is_invoice_row(array $row): bool
     return true;
 }
 
-function csv_fetch_customers(string $selectedCompany, string $environment, array $auth): array
+function csv_fetch_customers(string $selectedCompany, string $environment, array $auth, string $partyMode = 'debiteuren'): array
 {
+    $partyMode = report_normalize_party_mode($partyMode);
+    $entity = report_party_card_entity($partyMode);
+
     $params = [
         '$select' => implode(',', [
             'No',
@@ -159,21 +162,41 @@ function csv_fetch_customers(string $selectedCompany, string $environment, array
             'KVT_Chamber_Of_Commerce_No',
             'VAT_Registration_No',
             'Preferred_Bank_Account_Code',
+            'Phone_No',
+            'E_Mail',
         ]),
     ];
 
-    $url = odata_company_url($environment, $selectedCompany, 'AppCustomerCard', $params);
+    $url = odata_company_url($environment, $selectedCompany, $entity, $params);
+    $ttl = odata_cache_ttl_seconds();
 
     try {
-        return odata_get_all($url, $auth, 600);
+        return odata_get_all($url, $auth, $ttl);
     } catch (Throwable $e) {
-        $fallbackUrl = odata_company_url($environment, $selectedCompany, 'AppCustomerCard');
-        return odata_get_all($fallbackUrl, $auth, 300);
+        $fallbackUrl = odata_company_url($environment, $selectedCompany, $entity);
+        return odata_get_all($fallbackUrl, $auth, $ttl);
     }
 }
 
-function csv_fetch_ledger_rows(string $selectedCompany, string $environment, array $auth, bool $open): array
+function csv_fetch_ledger_rows(string $selectedCompany, string $environment, array $auth, bool $open, string $partyMode = 'debiteuren'): array
 {
+    $partyMode = report_normalize_party_mode($partyMode);
+    $openFilter = $open ? 'open' : 'closed';
+    $ttl = odata_cache_ttl_seconds();
+
+    if (report_is_crediteuren($partyMode)) {
+        $url = odata_company_url(
+            $environment,
+            $selectedCompany,
+            report_ledger_entity($partyMode),
+            report_ledger_odata_params($openFilter, $partyMode)
+        );
+        $entries = odata_get_all($url, $auth, $ttl);
+        $entries = report_normalize_ledger_entries($entries, $partyMode);
+        sort_ledger_entries($entries);
+        return $entries;
+    }
+
     $selectFields = [
         'Entry_No',
         'Posting_Date',
@@ -212,7 +235,7 @@ function csv_fetch_ledger_rows(string $selectedCompany, string $environment, arr
     );
 
     try {
-        $entries = odata_get_all($url, $auth, 600);
+        $entries = odata_get_all($url, $auth, $ttl);
         sort_ledger_entries($entries);
         return $entries;
     } catch (Throwable $e) {
@@ -226,7 +249,7 @@ function csv_fetch_ledger_rows(string $selectedCompany, string $environment, arr
                 '$filter' => $fallbackFilter,
             ]
         );
-        $entries = odata_get_all($fallbackUrl, $auth, 600);
+        $entries = odata_get_all($fallbackUrl, $auth, $ttl);
         sort_ledger_entries($entries);
         return $entries;
     }
@@ -277,11 +300,14 @@ function csv_build_binary(array $headers, array $rows): string
     return $csv;
 }
 
-function csv_export_definitions(): array
+function csv_export_definitions(string $partyMode = 'debiteuren'): array
 {
+    $partyMode = report_normalize_party_mode($partyMode);
+    $partyPluralUc = report_party_label_ucfirst($partyMode, true);
+
     return [
         'stambestand-debiteuren' => [
-            'filename' => 'Stambestand_Debiteuren.csv',
+            'filename' => 'Stambestand_' . $partyPluralUc . '.csv',
             'headers' => ['Deb.nr.', 'Naam', 'Adres', 'PC', 'Plaats', 'Land', 'KvK Nr.', 'Rek.nr.'],
         ],
         'openstaande-facturen' => [
@@ -295,9 +321,10 @@ function csv_export_definitions(): array
     ];
 }
 
-function csv_get_export_payload(string $selectedCompany, string $download, string $environment, array $auth): array
+function csv_get_export_payload(string $selectedCompany, string $download, string $environment, array $auth, string $partyMode = 'debiteuren'): array
 {
-    $definitions = csv_export_definitions();
+    $partyMode = report_normalize_party_mode($partyMode);
+    $definitions = csv_export_definitions($partyMode);
     if (!isset($definitions[$download])) {
         throw new InvalidArgumentException('Onbekende export: ' . $download);
     }
@@ -307,11 +334,11 @@ function csv_get_export_payload(string $selectedCompany, string $download, strin
     $rows = [];
 
     if ($download === 'stambestand-debiteuren') {
-        $rows = csv_build_stambestand_rows(csv_fetch_customers($selectedCompany, $environment, $auth));
+        $rows = csv_build_stambestand_rows(csv_fetch_customers($selectedCompany, $environment, $auth, $partyMode));
     } elseif ($download === 'openstaande-facturen') {
-        $rows = csv_build_openstaande_rows(csv_fetch_ledger_rows($selectedCompany, $environment, $auth, true));
+        $rows = csv_build_openstaande_rows(csv_fetch_ledger_rows($selectedCompany, $environment, $auth, true, $partyMode));
     } elseif ($download === 'betaalde-facturen') {
-        $rows = csv_build_betaalde_rows(csv_fetch_ledger_rows($selectedCompany, $environment, $auth, false));
+        $rows = csv_build_betaalde_rows(csv_fetch_ledger_rows($selectedCompany, $environment, $auth, false, $partyMode));
     }
 
     return [
@@ -321,9 +348,9 @@ function csv_get_export_payload(string $selectedCompany, string $download, strin
     ];
 }
 
-function csv_get_export_attachment(string $selectedCompany, string $download, string $environment, array $auth): array
+function csv_get_export_attachment(string $selectedCompany, string $download, string $environment, array $auth, string $partyMode = 'debiteuren'): array
 {
-    $payload = csv_get_export_payload($selectedCompany, $download, $environment, $auth);
+    $payload = csv_get_export_payload($selectedCompany, $download, $environment, $auth, $partyMode);
     $binary = csv_build_binary($payload['headers'], $payload['rows']);
 
     return [
@@ -410,8 +437,10 @@ function csv_build_betaalde_rows(array $entries): array
     return $rows;
 }
 
-function csv_build_rapport_rows(array $customers, array $entries): array
+function csv_build_rapport_rows(array $customers, array $entries, string $partyMode = 'debiteuren'): array
 {
+    $partyMode = report_normalize_party_mode($partyMode);
+    $partyLabelUc = report_party_label_ucfirst($partyMode, false);
     $today = new DateTime('today');
 
     $customerIndex = [];
@@ -472,8 +501,8 @@ function csv_build_rapport_rows(array $customers, array $entries): array
         $name = (string) ($customer['Name'] ?? '');
         $city = (string) ($customer['City'] ?? '');
 
-        // Debtor header row
-        $debtorRow = ['Debiteur', $customerNo, $name, $city, '', '', '', '', '', '', '', ''];
+        // Debtor/creditor header row
+        $debtorRow = [$partyLabelUc, $customerNo, $name, $city, '', '', '', '', '', '', '', ''];
         $rows[] = $debtorRow;
 
         // Entry rows
@@ -534,12 +563,14 @@ function csv_build_rapport_rows(array $customers, array $entries): array
     return $rows;
 }
 
-function csv_build_rapport_attachment(string $selectedCompany, string $environment, array $auth): array
+function csv_build_rapport_attachment(string $selectedCompany, string $environment, array $auth, string $partyMode = 'debiteuren'): array
 {
-    $customers = csv_fetch_customers($selectedCompany, $environment, $auth);
-    $entries = csv_fetch_ledger_rows($selectedCompany, $environment, $auth, true);
-    $headers = ['Type', 'Debiteur nr', 'Naam', 'Woonplaats', 'Bkst nr', 'Datum gemaakt', 'Vervaldatum', 'Bedrag', 'Dgn', 'Omschrijving', 'Afdeling', 'Notities'];
-    $rows = csv_build_rapport_rows($customers, $entries);
+    $partyMode = report_normalize_party_mode($partyMode);
+    $partyLabelUc = report_party_label_ucfirst($partyMode, false);
+    $customers = csv_fetch_customers($selectedCompany, $environment, $auth, $partyMode);
+    $entries = csv_fetch_ledger_rows($selectedCompany, $environment, $auth, true, $partyMode);
+    $headers = ['Type', $partyLabelUc . ' nr', 'Naam', 'Woonplaats', 'Bkst nr', 'Datum gemaakt', 'Vervaldatum', 'Bedrag', 'Dgn', 'Omschrijving', 'Afdeling', 'Notities'];
+    $rows = csv_build_rapport_rows($customers, $entries, $partyMode);
     $filename = 'Rapport_Openstaande_Posten_' . date('Ymd') . '.csv';
     $binary = csv_build_binary($headers, $rows);
 
@@ -551,8 +582,9 @@ function csv_build_rapport_attachment(string $selectedCompany, string $environme
 }
 
 $download = trim((string) ($_GET['download'] ?? ''));
+$exportPartyMode = report_normalize_party_mode($_GET['party_mode'] ?? 'debiteuren');
 
-$definitions = csv_export_definitions();
+$definitions = csv_export_definitions($exportPartyMode);
 $stamHeaders = $definitions['stambestand-debiteuren']['headers'];
 $openHeaders = $definitions['openstaande-facturen']['headers'];
 $paidHeaders = $definitions['betaalde-facturen']['headers'];
@@ -584,7 +616,7 @@ if ($exportContextError !== '') {
 }
 
 if ($download === 'stambestand-debiteuren') {
-    $payload = csv_get_export_payload($selectedCompany, $download, $selectedEnvironment, $selectedAuth);
+    $payload = csv_get_export_payload($selectedCompany, $download, $selectedEnvironment, $selectedAuth, $exportPartyMode);
 
     csv_output(
         (string) $payload['filename'],
@@ -594,7 +626,7 @@ if ($download === 'stambestand-debiteuren') {
 }
 
 if ($download === 'openstaande-facturen') {
-    $payload = csv_get_export_payload($selectedCompany, $download, $selectedEnvironment, $selectedAuth);
+    $payload = csv_get_export_payload($selectedCompany, $download, $selectedEnvironment, $selectedAuth, $exportPartyMode);
 
     csv_output(
         (string) $payload['filename'],
@@ -604,7 +636,7 @@ if ($download === 'openstaande-facturen') {
 }
 
 if ($download === 'betaalde-facturen') {
-    $payload = csv_get_export_payload($selectedCompany, $download, $selectedEnvironment, $selectedAuth);
+    $payload = csv_get_export_payload($selectedCompany, $download, $selectedEnvironment, $selectedAuth, $exportPartyMode);
 
     csv_output(
         (string) $payload['filename'],
@@ -613,9 +645,9 @@ if ($download === 'betaalde-facturen') {
     );
 }
 
-$stamRows = csv_build_stambestand_rows(csv_fetch_customers($selectedCompany, $selectedEnvironment, $selectedAuth));
-$openRows = csv_build_openstaande_rows(csv_fetch_ledger_rows($selectedCompany, $selectedEnvironment, $selectedAuth, true));
-$paidRows = csv_build_betaalde_rows(csv_fetch_ledger_rows($selectedCompany, $selectedEnvironment, $selectedAuth, false));
+$stamRows = csv_build_stambestand_rows(csv_fetch_customers($selectedCompany, $selectedEnvironment, $selectedAuth, $exportPartyMode));
+$openRows = csv_build_openstaande_rows(csv_fetch_ledger_rows($selectedCompany, $selectedEnvironment, $selectedAuth, true, $exportPartyMode));
+$paidRows = csv_build_betaalde_rows(csv_fetch_ledger_rows($selectedCompany, $selectedEnvironment, $selectedAuth, false, $exportPartyMode));
 
 $previewLimit = 15;
 $stamPreviewRows = array_slice($stamRows, 0, $previewLimit);

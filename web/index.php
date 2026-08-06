@@ -1,6 +1,12 @@
 <?php
 require_once __DIR__ . '/functions.php';
 
+// Cold OData fetches (before nightly cache) can exceed the default 120s web limit.
+@ini_set('max_execution_time', '7200');
+if (function_exists('set_time_limit')) {
+    @set_time_limit(7200);
+}
+
 $isMailReport = false;
 // Printvriendelijke modus forceren via ?printfriendly=true
 if ((isset($_GET['printfriendly']) && $_GET['printfriendly'] == 'true') || (isset($isMailReport) && $isMailReport)) {
@@ -54,6 +60,12 @@ if (!in_array($filter, ['all', 'overdue'], true)) {
     $filter = 'overdue';
 }
 
+$partyMode = report_normalize_party_mode($_GET['party_mode'] ?? 'debiteuren');
+$partyLabel = report_party_label($partyMode, false);
+$partyLabelPlural = report_party_label($partyMode, true);
+$partyLabelUc = report_party_label_ucfirst($partyMode, false);
+$partyLabelPluralUc = report_party_label_ucfirst($partyMode, true);
+
 $search = trim((string) ($_GET['search'] ?? ''));
 $searchLower = strtolower($search);
 $openFilter = $_GET['open_filter'] ?? 'open';
@@ -79,18 +91,21 @@ if ($companyDiscoveryError === '') {
     $customerUrl = odata_company_url(
         $selectedEnvironment,
         $selectedCompany,
-        'AppCustomerCard',
-        report_customer_odata_params()
+        report_party_card_entity($partyMode),
+        report_party_odata_params($partyMode)
     );
     $entriesUrl = odata_company_url(
         $selectedEnvironment,
         $selectedCompany,
-        'Customer_Ledger_Entries',
-        report_ledger_odata_params($openFilter)
+        report_ledger_entity($partyMode),
+        report_ledger_odata_params($openFilter, $partyMode)
     );
 
     $customers = odata_get_all($customerUrl, $auth, $cacheTtl);
-    $entries = odata_get_all($entriesUrl, $auth, $cacheTtl);
+    $entries = report_normalize_ledger_entries(
+        odata_get_all($entriesUrl, $auth, $cacheTtl),
+        $partyMode
+    );
     sort_ledger_entries($entries);
 }
 
@@ -223,6 +238,7 @@ $baseQueryParams = [
     'search' => $search,
     'open_filter' => $openFilter,
     'due_before' => $dueBeforeRaw,
+    'party_mode' => $partyMode,
 ];
 
 
@@ -237,7 +253,7 @@ if (isset($isMailReport) && $isMailReport) {
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Openstaande posten debiteuren</title>
+    <title>Openstaande posten <?= htmlspecialchars($partyLabelPlural) ?></title>
     <link rel="icon" href="/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
@@ -253,7 +269,10 @@ if (isset($isMailReport) && $isMailReport) {
             --highlight: #ffe2a6;
             --danger: #e15555;
             --overdue: #f6d8d8;
-            --negative: #dff2e2;
+            --favorable: #dff2e2;
+            --unfavorable: #f6d8d8;
+            --favorable-ink: #1f7a45;
+            --unfavorable-ink: #c73737;
             --panel: #ffffff;
         }
 
@@ -317,6 +336,39 @@ if (isset($isMailReport) && $isMailReport) {
             flex-wrap: wrap;
             gap: 10px;
             align-items: center;
+        }
+
+        .party-mode-toggle {
+            margin-left: auto;
+            display: inline-flex;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            overflow: hidden;
+            background: var(--panel);
+        }
+
+        .party-mode-toggle .party-mode-option {
+            border: none;
+            border-radius: 0;
+            box-shadow: none;
+            margin: 0;
+            background: transparent;
+            color: var(--ink);
+        }
+
+        .party-mode-toggle .party-mode-option + .party-mode-option {
+            border-left: 1px solid var(--line);
+        }
+
+        .party-mode-toggle .party-mode-option.is-active {
+            background: var(--accent);
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .party-mode-toggle .party-mode-option:hover {
+            transform: none;
+            box-shadow: none;
         }
 
         .print-date {
@@ -534,13 +586,27 @@ if (isset($isMailReport) && $isMailReport) {
             background: var(--overdue);
         }
 
-        tbody tr.row-negative {
-            background: var(--negative);
+        tbody tr.row-favorable {
+            background: var(--favorable);
+        }
+
+        tbody tr.row-unfavorable {
+            background: var(--unfavorable);
         }
 
         .amount {
             text-align: right;
             font-variant-numeric: tabular-nums;
+        }
+
+        .amount-favorable {
+            color: var(--favorable-ink);
+            font-weight: 600;
+        }
+
+        .amount-unfavorable {
+            color: var(--unfavorable-ink);
+            font-weight: 600;
         }
 
         .total-row td {
@@ -714,7 +780,7 @@ if (isset($isMailReport) && $isMailReport) {
         <div class="page-loader__box">Pagina wordt geladen...</div>
     </div>
     <header>
-        <h1>Openstaande posten debiteuren - <span class="company-name\"><?= htmlspecialchars($selectedCompany !== '' ? $selectedCompany : 'Geen bedrijf') ?></span></h1>
+        <h1>Openstaande posten <?= htmlspecialchars($partyLabelPlural) ?> - <span class="company-name"><?= htmlspecialchars($selectedCompany !== '' ? $selectedCompany : 'Geen bedrijf') ?></span></h1>
         <div class="print-date">Datum: <?= htmlspecialchars($todayFormatted) ?></div>
         <?php if (!$isMailReport && $companyDiscoveryError === ''): ?>
             <form class="controls" method="get">
@@ -725,8 +791,9 @@ if (isset($isMailReport) && $isMailReport) {
                     'css' => '{{root}} .odata-cache-widget{top:-23px;left:auto;right:0px;} {{root}} .odata-cache-popout{top:64px;left:auto;right:20px;}'
                 ]) ?>
                 <a class="button-link" href="mail_report.php">Mailrapportage</a>
-                <a id="csvExportLink" class="button-link" href="export.php?company=<?= urlencode($selectedCompany) ?>">CSV Export</a>
+                <a id="csvExportLink" class="button-link" href="export.php?company=<?= urlencode($selectedCompany) ?>&party_mode=<?= urlencode($partyMode) ?>">CSV Export</a>
                 <input id="filterInput" type="hidden" name="filter" value="<?= htmlspecialchars($filter) ?>" />
+                <input id="partyModeInput" type="hidden" name="party_mode" value="<?= htmlspecialchars($partyMode) ?>" />
                 <label>
                     <select id="companySelect" name="company">
                         <?php foreach ($companies as $company): ?>
@@ -743,7 +810,7 @@ if (isset($isMailReport) && $isMailReport) {
                 </label>
                 <label>
                     <select id="customerSelect" name="customer_no">
-                        <option value="">Alle debiteuren</option>
+                        <option value="">Alle <?= htmlspecialchars($partyLabelPlural) ?></option>
                         <?php foreach ($customerOptions as $customerNo): ?>
                             <?php $customerName = (string) ($customerIndex[$customerNo]['Name'] ?? ''); ?>
                             <option value="<?= htmlspecialchars($customerNo) ?>" <?= $customerNo === $selectedCustomerNo ? 'selected' : '' ?>>
@@ -769,6 +836,12 @@ if (isset($isMailReport) && $isMailReport) {
                     posten</button>
                 <button id="filterOverdueButton" type="submit" data-filter-value="overdue"
                     class="<?= $filter === 'overdue' ? 'filter-active' : '' ?>">Vervallen posten</button>
+                <div class="party-mode-toggle" role="group" aria-label="Debiteuren of Crediteuren">
+                    <button type="button" class="party-mode-option <?= $partyMode === 'debiteuren' ? 'is-active' : '' ?>"
+                        data-party-mode="debiteuren">Debiteuren</button>
+                    <button type="button" class="party-mode-option <?= $partyMode === 'crediteuren' ? 'is-active' : '' ?>"
+                        data-party-mode="crediteuren">Crediteuren</button>
+                </div>
             </form>
         <?php endif; ?>
     </header>
@@ -801,8 +874,8 @@ if (isset($isMailReport) && $isMailReport) {
         <section class="group">
             <hr>
             <div class="customer-header">
-                <span class="customer-header-item">Debiteur: <a class="customer-no"
-                        href="<?= htmlspecialchars($customerLink) ?>\"><?= htmlspecialchars($customerNoValue) ?></a>&nbsp;
+                <span class="customer-header-item"><?= htmlspecialchars($partyLabelUc) ?>: <a class="customer-no"
+                        href="<?= htmlspecialchars($customerLink) ?>"><?= htmlspecialchars($customerNoValue) ?></a>&nbsp;
                 </span>
                 <span class="customer-header-item"><?= htmlspecialchars((string) ($customer['Name'] ?? '')) ?>&nbsp;</span>
                 <span class="customer-header-item"><span class="customer-header-label">Woonplaats:</span> <?= htmlspecialchars((string) ($customer['City'] ?? '')) ?>&nbsp;</span>
@@ -851,12 +924,16 @@ if (isset($isMailReport) && $isMailReport) {
                 <tbody>
                     <?php foreach ($group['entries'] as $entry): ?>
                         <?php
+                        $amountTone = report_amount_tone((float) $entry['_amount'], $partyMode);
                         $rowClass = '';
-                        if ($entry['_amount'] < 0) {
-                            $rowClass = 'row-negative';
+                        if ($amountTone === 'unfavorable') {
+                            $rowClass = 'row-unfavorable';
+                        } elseif ($amountTone === 'favorable') {
+                            $rowClass = 'row-favorable';
                         } elseif ($entry['_days_overdue'] > 0) {
                             $rowClass = 'row-overdue';
                         }
+                        $amountClass = $amountTone === 'neutral' ? 'amount' : 'amount amount-' . $amountTone;
                         $dateMade = $entry['Document_Date'] ?? $entry['Posting_Date'] ?? '';
                         $dateDue = $entry['Due_Date'] ?? '';
                         $dateClosed = $entry['Closed_at_Date'] ?? '';
@@ -888,7 +965,7 @@ if (isset($isMailReport) && $isMailReport) {
                             </td>
                             <td data-label="Datum gemaakt"><?= htmlspecialchars($dateMadeDisplay) ?></td>
                             <td data-label="Datum verval" class="due-date-cell"><?= htmlspecialchars($dateDueDisplay) ?></td>
-                            <td data-label="Verschuldigd" class="amount" title="<?= htmlspecialchars($lcyTitle) ?>">
+                            <td data-label="Verschuldigd" class="<?= htmlspecialchars($amountClass) ?>" title="<?= htmlspecialchars($lcyTitle) ?>">
                                 <?= htmlspecialchars(format_amount_with_currency($entry['_amount'], $currencyCode)) ?>
                             </td>
                             <td data-label="Dagen vervallen">
@@ -900,7 +977,7 @@ if (isset($isMailReport) && $isMailReport) {
                         </tr>
                     <?php endforeach; ?>
                     <tr class="total-row">
-                        <td colspan="3">Totaal voor debiteur <span
+                        <td colspan="3">Totaal voor <?= htmlspecialchars($partyLabel) ?> <span
                                 class="customer-no"><?= htmlspecialchars((string) ($customer['No'] ?? '')) ?></span></td>
                         <?php
                         $totalParts = [];
@@ -1072,6 +1149,28 @@ if (isset($isMailReport) && $isMailReport) {
                     setFilterValue('overdue');
                 });
             }
+
+            const partyModeInput = document.getElementById('partyModeInput');
+            document.querySelectorAll('.party-mode-option').forEach((button) =>
+            {
+                button.addEventListener('click', () =>
+                {
+                    const mode = button.getAttribute('data-party-mode') || 'debiteuren';
+                    if (partyModeInput)
+                    {
+                        partyModeInput.value = mode;
+                    }
+                    if (customerSelect)
+                    {
+                        customerSelect.value = '';
+                    }
+                    showPageLoader();
+                    if (controlsForm)
+                    {
+                        controlsForm.requestSubmit();
+                    }
+                });
+            });
 
             if (companySelect && controlsForm)
             {

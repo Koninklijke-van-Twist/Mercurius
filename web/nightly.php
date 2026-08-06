@@ -56,7 +56,6 @@ function nightly_extend_time_limit(): void
 
 $startedAt = microtime(true);
 $cacheTtl = odata_cache_ttl_seconds();
-$openFilters = ['open', 'closed', 'both'];
 $ok = 0;
 $failed = 0;
 
@@ -74,6 +73,9 @@ try {
 
 nightly_write('Nightly cache warm-up gestart (' . count($companies) . ' bedrijven, TTL ' . $cacheTtl . 's)');
 
+$partyModes = ['debiteuren', 'crediteuren'];
+$openFilters = ['open', 'closed', 'both'];
+
 foreach ($companies as $company) {
     $company = (string) $company;
     nightly_extend_time_limit();
@@ -82,26 +84,28 @@ foreach ($companies as $company) {
         $environment = getEnvironmentForCompany($company);
         $auth = auth_get_for_environment($environment);
 
-        $customerUrl = odata_company_url(
-            $environment,
-            $company,
-            'AppCustomerCard',
-            report_customer_odata_params()
-        );
-        $customers = odata_get_all($customerUrl, $auth, $cacheTtl, true);
-        nightly_write("  {$company}: customers=" . count($customers));
-        nightly_extend_time_limit();
-
-        foreach ($openFilters as $openFilter) {
-            $entriesUrl = odata_company_url(
+        foreach ($partyModes as $partyMode) {
+            $partyUrl = odata_company_url(
                 $environment,
                 $company,
-                'Customer_Ledger_Entries',
-                report_ledger_odata_params($openFilter)
+                report_party_card_entity($partyMode),
+                report_party_odata_params($partyMode)
             );
-            $entries = odata_get_all($entriesUrl, $auth, $cacheTtl, true);
-            nightly_write("  {$company}: ledger[{$openFilter}]=" . count($entries));
+            $parties = odata_get_all($partyUrl, $auth, $cacheTtl, true);
+            nightly_write("  {$company} [{$partyMode}]: parties=" . count($parties));
             nightly_extend_time_limit();
+
+            foreach ($openFilters as $openFilter) {
+                $entriesUrl = odata_company_url(
+                    $environment,
+                    $company,
+                    report_ledger_entity($partyMode),
+                    report_ledger_odata_params($openFilter, $partyMode)
+                );
+                $entries = odata_get_all($entriesUrl, $auth, $cacheTtl, true);
+                nightly_write("  {$company} [{$partyMode}]: ledger[{$openFilter}]=" . count($entries));
+                nightly_extend_time_limit();
+            }
         }
 
         $ok++;

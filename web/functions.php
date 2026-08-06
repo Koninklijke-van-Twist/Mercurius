@@ -19,7 +19,66 @@ function odata_cache_ttl_seconds(): int
     return 23 * 3600;
 }
 
+function report_normalize_party_mode(?string $mode): string
+{
+    $normalized = strtolower(trim((string) $mode));
+    return $normalized === 'crediteuren' ? 'crediteuren' : 'debiteuren';
+}
+
+function report_is_crediteuren(string $mode): bool
+{
+    return report_normalize_party_mode($mode) === 'crediteuren';
+}
+
+function report_party_label(string $mode, bool $plural = false): string
+{
+    if (report_is_crediteuren($mode)) {
+        return $plural ? 'crediteuren' : 'crediteur';
+    }
+
+    return $plural ? 'debiteuren' : 'debiteur';
+}
+
+function report_party_label_ucfirst(string $mode, bool $plural = false): string
+{
+    return ucfirst(report_party_label($mode, $plural));
+}
+
+/**
+ * Amount tone for row/text coloring.
+ * Debiteuren: positive = favorable (green), negative = unfavorable (red).
+ * Crediteuren: positive = unfavorable (red), negative = favorable (green).
+ */
+function report_amount_tone(float $amount, string $mode): string
+{
+    if (abs($amount) < 0.00001) {
+        return 'neutral';
+    }
+
+    $positiveIsFavorable = !report_is_crediteuren($mode);
+    if ($amount > 0) {
+        return $positiveIsFavorable ? 'favorable' : 'unfavorable';
+    }
+
+    return $positiveIsFavorable ? 'unfavorable' : 'favorable';
+}
+
+function report_party_card_entity(string $mode): string
+{
+    return report_is_crediteuren($mode) ? 'VendorCard' : 'AppCustomerCard';
+}
+
+function report_ledger_entity(string $mode): string
+{
+    return report_is_crediteuren($mode) ? 'Crediteurenposten' : 'Customer_Ledger_Entries';
+}
+
 function report_customer_odata_params(): array
+{
+    return report_party_odata_params('debiteuren');
+}
+
+function report_party_odata_params(string $mode = 'debiteuren'): array
 {
     return [
         '$select' => 'No,Name,City,E_Mail,Phone_No',
@@ -27,34 +86,65 @@ function report_customer_odata_params(): array
 }
 
 /**
- * OData params for Customer_Ledger_Entries as used by index.php.
+ * OData params for ledger entries as used by index.php.
  * $openFilter: open | closed | both
+ * $mode: debiteuren | crediteuren
  */
-function report_ledger_odata_params(string $openFilter = 'open'): array
+function report_ledger_odata_params(string $openFilter = 'open', string $mode = 'debiteuren'): array
 {
-    $params = [
-        '$select' => implode(',', [
-            'Entry_No',
-            'Posting_Date',
-            'Document_Date',
-            'Document_No',
-            'Customer_No',
-            'Customer_Name',
-            'Description',
-            'Salesperson_Code',
-            'Global_Dimension_1_Code',
-            'Global_Dimension_2_Code',
-            'Currency_Code',
-            'Remaining_Amt_LCY',
-            'Remaining_Amount',
-            'Due_Date',
-            'Closed_at_Date',
-            'External_Document_No',
-            'Your_Reference',
-            'Open',
-            'KVT_Memo',
-        ]),
-    ];
+    $mode = report_normalize_party_mode($mode);
+
+    if (report_is_crediteuren($mode)) {
+        $params = [
+            '$select' => implode(',', [
+                'Entry_No',
+                'Posting_Date',
+                'Document_Date',
+                'Document_No',
+                'Vendor_No',
+                'Vendor_Name',
+                'Description',
+                'Purchaser_Code',
+                'Global_Dimension_1_Code',
+                'Global_Dimension_2_Code',
+                'Currency_Code',
+                'Remaining_Amt_LCY',
+                'Remaining_Amount',
+                'Due_Date',
+                'Closed_at_Date',
+                'External_Document_No',
+                'Open',
+                'Message_to_Recipient',
+                'Document_Type',
+                'Amount',
+                'Original_Amount',
+            ]),
+        ];
+    } else {
+        $params = [
+            '$select' => implode(',', [
+                'Entry_No',
+                'Posting_Date',
+                'Document_Date',
+                'Document_No',
+                'Customer_No',
+                'Customer_Name',
+                'Description',
+                'Salesperson_Code',
+                'Global_Dimension_1_Code',
+                'Global_Dimension_2_Code',
+                'Currency_Code',
+                'Remaining_Amt_LCY',
+                'Remaining_Amount',
+                'Due_Date',
+                'Closed_at_Date',
+                'External_Document_No',
+                'Your_Reference',
+                'Open',
+                'KVT_Memo',
+            ]),
+        ];
+    }
 
     if ($openFilter === 'open') {
         $params['$filter'] = 'Open eq true';
@@ -63,6 +153,30 @@ function report_ledger_odata_params(string $openFilter = 'open'): array
     }
 
     return $params;
+}
+
+/** Map Crediteurenposten fields onto the Debiteuren shape used by grouping/UI. */
+function report_normalize_ledger_entries(array $entries, string $mode): array
+{
+    if (!report_is_crediteuren($mode)) {
+        return $entries;
+    }
+
+    foreach ($entries as &$entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+        $entry['Customer_No'] = (string) ($entry['Vendor_No'] ?? $entry['Customer_No'] ?? '');
+        $entry['Customer_Name'] = (string) ($entry['Vendor_Name'] ?? $entry['Customer_Name'] ?? '');
+        $entry['Salesperson_Code'] = (string) ($entry['Purchaser_Code'] ?? $entry['Salesperson_Code'] ?? '');
+        $entry['KVT_Memo'] = (string) ($entry['Message_to_Recipient'] ?? $entry['KVT_Memo'] ?? '');
+        if (!isset($entry['Your_Reference'])) {
+            $entry['Your_Reference'] = '';
+        }
+    }
+    unset($entry);
+
+    return $entries;
 }
 
 function pick_amount(array $entry): float

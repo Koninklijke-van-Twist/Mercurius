@@ -272,7 +272,7 @@ function normalize_report_attachment_selection(array $attachmentSelection): arra
     return $normalized;
 }
 
-function build_export_csv_attachment(string $company, string $download): array
+function build_export_csv_attachment(string $company, string $download, string $partyMode = 'debiteuren'): array
 {
     if (!defined('MERCURIUS_EXPORT_LIB_ONLY')) {
         define('MERCURIUS_EXPORT_LIB_ONLY', true);
@@ -281,15 +281,16 @@ function build_export_csv_attachment(string $company, string $download): array
     // Save $download before require_once, because export.php sets $download = $_GET['download']
     // at file scope which runs in this function's local scope and would overwrite the parameter.
     $csvDownloadKey = $download;
+    $csvPartyMode = report_normalize_party_mode($partyMode);
     require_once __DIR__ . '/export.php';
 
     $companyEnvironment = getEnvironmentForCompany($company);
     $auth = auth_get_for_environment($companyEnvironment);
 
-    return csv_get_export_attachment($company, $csvDownloadKey, $companyEnvironment, $auth);
+    return csv_get_export_attachment($company, $csvDownloadKey, $companyEnvironment, $auth, $csvPartyMode);
 }
 
-function build_rapport_csv_attachment(string $company): array
+function build_rapport_csv_attachment(string $company, string $partyMode = 'debiteuren'): array
 {
     if (!defined('MERCURIUS_EXPORT_LIB_ONLY')) {
         define('MERCURIUS_EXPORT_LIB_ONLY', true);
@@ -299,12 +300,13 @@ function build_rapport_csv_attachment(string $company): array
     $companyEnvironment = getEnvironmentForCompany($company);
     $auth = auth_get_for_environment($companyEnvironment);
 
-    return csv_build_rapport_attachment($company, $companyEnvironment, $auth);
+    return csv_build_rapport_attachment($company, $companyEnvironment, $auth, $partyMode);
 }
 
-function build_report_mail_attachments(string $company, array $reportMail, string $html, array $attachmentSelection): array
+function build_report_mail_attachments(string $company, array $reportMail, string $html, array $attachmentSelection, string $partyMode = 'debiteuren'): array
 {
     $selection = normalize_report_attachment_selection($attachmentSelection);
+    $partyMode = report_normalize_party_mode($partyMode);
     $attachments = [];
 
     if ($selection['pdf_report']) {
@@ -317,25 +319,25 @@ function build_report_mail_attachments(string $company, array $reportMail, strin
     }
 
     if ($selection['csv_rapport']) {
-        $attachments[] = build_rapport_csv_attachment((string) $company);
+        $attachments[] = build_rapport_csv_attachment((string) $company, $partyMode);
     }
 
     if ($selection['csv_stambestand']) {
-        $attachments[] = build_export_csv_attachment($company, 'stambestand-debiteuren');
+        $attachments[] = build_export_csv_attachment($company, 'stambestand-debiteuren', $partyMode);
     }
 
     if ($selection['csv_openstaande']) {
-        $attachments[] = build_export_csv_attachment($company, 'openstaande-facturen');
+        $attachments[] = build_export_csv_attachment($company, 'openstaande-facturen', $partyMode);
     }
 
     if ($selection['csv_betaalde']) {
-        $attachments[] = build_export_csv_attachment($company, 'betaalde-facturen');
+        $attachments[] = build_export_csv_attachment($company, 'betaalde-facturen', $partyMode);
     }
 
     return $attachments;
 }
 
-function fetch_report_html(string $company): string
+function fetch_report_html(string $company, string $partyMode = 'debiteuren'): string
 {
     $indexFile = __DIR__ . '/index.php';
     if (!file_exists($indexFile)) {
@@ -350,6 +352,7 @@ function fetch_report_html(string $company): string
         'search' => '',
         'due_before' => '',
         'customer_no' => '',
+        'party_mode' => report_normalize_party_mode($partyMode),
     ];
 
     $originalGet = $_GET;
@@ -500,17 +503,26 @@ function record_report_mail_history(string $company, string $sentBy, array $reci
     save_report_mail_history($history);
 }
 
-function send_company_report(array $reportMail, string $company, array $recipients, array $attachmentSelection = []): array
+function send_company_report(array $reportMail, string $company, array $recipients, array $attachmentSelection = [], string $partyMode = 'debiteuren'): array
 {
     $recipients = normalize_recipients($recipients);
     if (empty($recipients)) {
         throw new RuntimeException('Geen geldige ontvangers voor bedrijf');
     }
 
+    $partyMode = report_normalize_party_mode($partyMode);
+    $partyPlural = report_party_label($partyMode, true);
+
     $subjectPrefix = trim((string) ($reportMail['subject_prefix'] ?? 'Openstaande posten debiteuren'));
+    if (report_is_crediteuren($partyMode)) {
+        $subjectPrefix = preg_replace('/debiteuren/i', 'crediteuren', $subjectPrefix) ?? $subjectPrefix;
+        if (stripos($subjectPrefix, 'crediteuren') === false) {
+            $subjectPrefix = 'Openstaande posten crediteuren';
+        }
+    }
     $dateText = date('d-m-Y');
 
-    $html = fetch_report_html((string) $company);
+    $html = fetch_report_html((string) $company, $partyMode);
     $html = sanitize_mail_html($html);
     $html = inline_css_from_style_tags($html);
     $html = preg_replace_callback(
@@ -523,7 +535,7 @@ function send_company_report(array $reportMail, string $company, array $recipien
     $html = preg_replace('/<script\b[^>]*>.*?<\/script>/is', '', $html) ?? $html;
 
     $subject = $subjectPrefix . ' - ' . $company . ' - ' . $dateText;
-    $attachments = build_report_mail_attachments((string) $company, $reportMail, $html, $attachmentSelection);
+    $attachments = build_report_mail_attachments((string) $company, $reportMail, $html, $attachmentSelection, $partyMode);
     if (empty($attachments)) {
         throw new RuntimeException('Selecteer minimaal 1 bijlage om mee te sturen.');
     }
@@ -538,20 +550,20 @@ function send_company_report(array $reportMail, string $company, array $recipien
 
     $stats = extract_report_stats_from_html($html);
     $postenText = number_format((int) ($stats['posten'] ?? 0), 0, ',', '.');
-    $debiteurenText = number_format((int) ($stats['debiteuren'] ?? 0), 0, ',', '.');
+    $partiesText = number_format((int) ($stats['debiteuren'] ?? 0), 0, ',', '.');
     $totaalText = format_eur_nl((float) ($stats['totaal'] ?? 0.0));
 
     $textBody = "Beste collega,\n\n"
-        . "Bijgevoegd is de rapportage van vervallen posten.\n\n"
-        . "Er staan {$postenText} vervallen posten open, verspreid over {$debiteurenText} debiteuren, met een totaalwaarde van {$totaalText}.\n"
+        . "Bijgevoegd is de rapportage van vervallen posten ({$partyPlural}).\n\n"
+        . "Er staan {$postenText} vervallen posten open, verspreid over {$partiesText} {$partyPlural}, met een totaalwaarde van {$totaalText}.\n"
         . "U kunt deze rapportage ook zien op: https://sleutels.kvt.nl/mercurius/\n\n"
         . "Met vriendelijke groet,\n\n"
         . "KVT Robot";
 
     $htmlBody = '<!doctype html><html><body>'
         . '<p>Beste collega,</p>'
-        . '<p>Bijgevoegd is de rapportage van vervallen posten.</p>'
-        . '<p>Er staan <strong>' . htmlspecialchars($postenText, ENT_QUOTES, 'UTF-8') . '</strong> vervallen posten open, verspreid over <strong>' . htmlspecialchars($debiteurenText, ENT_QUOTES, 'UTF-8') . '</strong> debiteuren, met een totaalwaarde van <strong>' . htmlspecialchars($totaalText, ENT_QUOTES, 'UTF-8') . '</strong>.</p>'
+        . '<p>Bijgevoegd is de rapportage van vervallen posten (' . htmlspecialchars($partyPlural, ENT_QUOTES, 'UTF-8') . ').</p>'
+        . '<p>Er staan <strong>' . htmlspecialchars($postenText, ENT_QUOTES, 'UTF-8') . '</strong> vervallen posten open, verspreid over <strong>' . htmlspecialchars($partiesText, ENT_QUOTES, 'UTF-8') . '</strong> ' . htmlspecialchars($partyPlural, ENT_QUOTES, 'UTF-8') . ', met een totaalwaarde van <strong>' . htmlspecialchars($totaalText, ENT_QUOTES, 'UTF-8') . '</strong>.</p>'
         . '<p>U kunt deze rapportage ook zien op: <a href="https://sleutels.kvt.nl/mercurius/">Mercurius</a></p>'
         . '<p>Met vriendelijke groet,<br><br>KVT Robot</p>'
         . '</body></html>';

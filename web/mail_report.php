@@ -58,6 +58,7 @@ try {
 sort($allUsers, SORT_NATURAL | SORT_FLAG_CASE);
 
 $submittedRecipientsByCompany = [];
+$submittedPartyModeByCompany = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string) ($_POST['action'] ?? '');
@@ -76,6 +77,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'csv_openstaande' => isset($_POST['attach_csv_openstaande']),
         'csv_betaalde' => isset($_POST['attach_csv_betaalde']),
     ];
+
+    $postedPartyMode = report_normalize_party_mode($_POST['party_mode'] ?? 'debiteuren');
+    $submittedPartyModeByCompany[$company] = $postedPartyMode;
 
     if (in_array($company, $companies, true)) {
         $attachmentSettingsByCompany[$company] = [
@@ -112,7 +116,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($action === 'save_attachments') {
                 $successMessage = 'Bijlage-instellingen opgeslagen voor ' . $company . '.';
             } else {
-                $result = send_company_report($reportMail, $company, $selectedRecipients, $postedAttachmentSettings);
+                $result = send_company_report(
+                    $reportMail,
+                    $company,
+                    $selectedRecipients,
+                    $postedAttachmentSettings,
+                    $postedPartyMode
+                );
                 record_report_mail_history($company, $currentUserEmail !== '' ? $currentUserEmail : 'onbekend', $result['recipients']);
                 $history = load_report_mail_history();
                 $recipientCount = count($result['recipients']);
@@ -465,6 +475,23 @@ function sort_users_for_company(array $users, string $company, array $recipientS
                     $attachmentSettings = $attachmentSettingsByCompany[$company] ?? report_mail_attachment_defaults();
                     ?>
 
+                    <fieldset class="user-list" style="margin-bottom:10px;">
+                        <legend style="padding:0 4px; font-size:13px; color:var(--muted);">Rapporttype</legend>
+                        <?php
+                        $selectedPartyMode = report_normalize_party_mode(
+                            $submittedPartyModeByCompany[$company] ?? 'debiteuren'
+                        );
+                        ?>
+                        <label class="user-item">
+                            <input type="radio" name="party_mode" value="debiteuren" <?= $selectedPartyMode === 'debiteuren' ? 'checked' : '' ?>>
+                            Debiteuren
+                        </label>
+                        <label class="user-item">
+                            <input type="radio" name="party_mode" value="crediteuren" <?= $selectedPartyMode === 'crediteuren' ? 'checked' : '' ?>>
+                            Crediteuren
+                        </label>
+                    </fieldset>
+
                     <fieldset class="user-list" style="margin-bottom:10px;"
                         data-attachment-company="<?= htmlspecialchars($company) ?>">
                         <legend style="padding:0 4px; font-size:13px; color:var(--muted);">Bijlagen</legend>
@@ -478,7 +505,7 @@ function sort_users_for_company(array $users, string $company, array $recipientS
                         </label>
                         <label class="user-item">
                             <input type="checkbox" name="attach_csv_stambestand" <?= ((int) ($attachmentSettings['csv_stambestand'] ?? 0)) === 1 ? 'checked' : '' ?>>
-                            CSV - Stambestand debiteuren
+                            CSV - Stambestand
                         </label>
                         <label class="user-item">
                             <input type="checkbox" name="attach_csv_openstaande" <?= ((int) ($attachmentSettings['csv_openstaande'] ?? 0)) === 1 ? 'checked' : '' ?>>

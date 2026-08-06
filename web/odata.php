@@ -22,10 +22,15 @@ function odata_get_all(string $url, array $auth, $ttlSeconds = 300, bool $forceR
         }
     }
 
+    // Live BC fetch can paginate for several minutes; keep PHP from aborting mid-way
+    // so the result can be written to cache for subsequent page loads.
+    odata_extend_execution_budget();
+
     $all = [];
     $next = $url;
 
     while ($next) {
+        odata_extend_execution_budget();
         $resp = odata_get_json($next, $auth);
 
         if (!isset($resp['value']) || !is_array($resp['value'])) {
@@ -40,12 +45,22 @@ function odata_get_all(string $url, array $auth, $ttlSeconds = 300, bool $forceR
     return $all;
 }
 
+function odata_extend_execution_budget(int $seconds = 7200): void
+{
+    @ini_set('max_execution_time', (string) $seconds);
+    if (function_exists('set_time_limit')) {
+        @set_time_limit($seconds);
+    }
+}
+
 function odata_get_json(string $url, array $auth): array
 {
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_CONNECTTIMEOUT => 60,
+        CURLOPT_TIMEOUT => 600,
         CURLOPT_HTTPHEADER => [
             "Accept: application/json",
         ],
@@ -67,7 +82,9 @@ function odata_get_json(string $url, array $auth): array
 
     $raw = curl_exec($ch);
     if ($raw === false) {
-        throw new Exception("cURL error: " . curl_error($ch));
+        $error = curl_error($ch);
+        curl_close($ch);
+        throw new Exception("cURL error: " . $error);
     }
 
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
