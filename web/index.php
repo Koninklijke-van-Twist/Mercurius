@@ -114,27 +114,23 @@ foreach ($customers as $customer) {
     if (!isset($customer['No'])) {
         continue;
     }
-    $customerIndex[(string) $customer['No']] = $customer;
+    $customerNoKey = trim((string) $customer['No']);
+    if ($customerNoKey === '') {
+        continue;
+    }
+    $customerIndex[$customerNoKey] = $customer;
 }
 
 $selectedCustomerNo = trim((string) ($_GET['customer_no'] ?? ''));
-$customerOptions = array_keys($customerIndex);
-sort($customerOptions, SORT_NATURAL);
-if ($selectedCustomerNo !== '' && !in_array($selectedCustomerNo, $customerOptions, true)) {
-    $customerIndex[$selectedCustomerNo] = ['No' => $selectedCustomerNo, 'Name' => ''];
-    array_unshift($customerOptions, $selectedCustomerNo);
-}
 
 $today = new DateTime('today');
 $todayFormatted = format_date_nl($today->format('Y-m-d'), false);
 $groups = [];
+$customerOptionsSet = [];
 
 foreach ($entries as $entry) {
-    if (!isset($entry['Customer_No'])) {
-        continue;
-    }
-
-    if ($selectedCustomerNo !== '' && (string) $entry['Customer_No'] !== $selectedCustomerNo) {
+    $entryCustomerNo = trim((string) ($entry['Customer_No'] ?? ''));
+    if ($entryCustomerNo === '') {
         continue;
     }
 
@@ -171,12 +167,11 @@ foreach ($entries as $entry) {
     }
 
     if ($searchLower !== '') {
-        $customerNo = (string) $entry['Customer_No'];
-        $customerInfo = $customerIndex[$customerNo] ?? [];
+        $customerInfo = $customerIndex[$entryCustomerNo] ?? [];
         $searchHaystack = implode(' ', [
             (string) ($entry['Document_No'] ?? ''),
             (string) ($entry['Entry_No'] ?? ''),
-            (string) ($entry['Customer_No'] ?? ''),
+            $entryCustomerNo,
             (string) ($entry['Customer_Name'] ?? ''),
             (string) ($entry['Description'] ?? ''),
             (string) ($entry['Salesperson_Code'] ?? ''),
@@ -198,11 +193,27 @@ foreach ($entries as $entry) {
         }
     }
 
-    $customerNo = (string) $entry['Customer_No'];
-    if (!isset($groups[$customerNo])) {
-        $groups[$customerNo] = [
-            'customer' => $customerIndex[$customerNo] ?? [
-                'No' => $customerNo,
+    // Dropdown only lists parties that have rows under the current filters
+    // (ignoring the customer_no selection itself).
+    $customerOptionsSet[$entryCustomerNo] = true;
+    if (!isset($customerIndex[$entryCustomerNo])) {
+        $customerIndex[$entryCustomerNo] = [
+            'No' => $entryCustomerNo,
+            'Name' => (string) ($entry['Customer_Name'] ?? ''),
+            'City' => '',
+            'Phone_No' => '',
+            'E_Mail' => '',
+        ];
+    }
+
+    if ($selectedCustomerNo !== '' && $entryCustomerNo !== $selectedCustomerNo) {
+        continue;
+    }
+
+    if (!isset($groups[$entryCustomerNo])) {
+        $groups[$entryCustomerNo] = [
+            'customer' => $customerIndex[$entryCustomerNo] ?? [
+                'No' => $entryCustomerNo,
                 'Name' => (string) ($entry['Customer_Name'] ?? ''),
                 'City' => '',
                 'Phone_No' => '',
@@ -221,13 +232,23 @@ foreach ($entries as $entry) {
     $entry['_closed_at_date'] = $closedDate;
     $entry['_currency_code'] = (string) ($entry['Currency_Code'] ?? '');
 
-    $groups[$customerNo]['entries'][] = $entry;
-    $groups[$customerNo]['total'] += $amount;
+    $groups[$entryCustomerNo]['entries'][] = $entry;
+    $groups[$entryCustomerNo]['total'] += $amount;
     $totalCurrency = $entry['_currency_code'] !== '' ? $entry['_currency_code'] : 'EUR';
-    if (!isset($groups[$customerNo]['totals_by_currency'][$totalCurrency])) {
-        $groups[$customerNo]['totals_by_currency'][$totalCurrency] = 0.0;
+    if (!isset($groups[$entryCustomerNo]['totals_by_currency'][$totalCurrency])) {
+        $groups[$entryCustomerNo]['totals_by_currency'][$totalCurrency] = 0.0;
     }
-    $groups[$customerNo]['totals_by_currency'][$totalCurrency] += $amount;
+    $groups[$entryCustomerNo]['totals_by_currency'][$totalCurrency] += $amount;
+}
+
+$customerOptions = array_keys($customerOptionsSet);
+sort($customerOptions, SORT_NATURAL);
+if ($selectedCustomerNo !== '' && !in_array($selectedCustomerNo, $customerOptions, true)) {
+    if (!isset($customerIndex[$selectedCustomerNo])) {
+        $customerIndex[$selectedCustomerNo] = ['No' => $selectedCustomerNo, 'Name' => ''];
+    }
+    $customerOptions[] = $selectedCustomerNo;
+    sort($customerOptions, SORT_NATURAL);
 }
 
 uksort($groups, 'compare_customer_no');
@@ -1175,6 +1196,15 @@ if (isset($isMailReport) && $isMailReport) {
             if (companySelect && controlsForm)
             {
                 companySelect.addEventListener('change', () =>
+                {
+                    showPageLoader();
+                    controlsForm.requestSubmit();
+                });
+            }
+
+            if (customerSelect && controlsForm)
+            {
+                customerSelect.addEventListener('change', () =>
                 {
                     showPageLoader();
                     controlsForm.requestSubmit();
