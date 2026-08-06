@@ -3,7 +3,7 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-function odata_get_all(string $url, array $auth, $ttlSeconds = 300): array
+function odata_get_all(string $url, array $auth, $ttlSeconds = 300, bool $forceRefresh = false): array
 {
     $ttlSeconds = max(1, (int) $ttlSeconds);
     maybe_cleanup_expired_cache_files();
@@ -11,7 +11,7 @@ function odata_get_all(string $url, array $auth, $ttlSeconds = 300): array
     $cacheKey = build_cache_key($url, $auth);
     $cachePath = cache_path_for_key($cacheKey);
 
-    if (is_file($cachePath)) {
+    if (!$forceRefresh && is_file($cachePath)) {
         $cached = read_cache_payload($cachePath, $ttlSeconds);
         if ($cached['valid']) {
             return $cached['data'];

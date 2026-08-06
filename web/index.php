@@ -75,61 +75,22 @@ $customers = [];
 $entries = [];
 
 if ($companyDiscoveryError === '') {
+    $cacheTtl = odata_cache_ttl_seconds();
     $customerUrl = odata_company_url(
         $selectedEnvironment,
         $selectedCompany,
         'AppCustomerCard',
-        [
-            '$select' => 'No,Name,City,E_Mail,Phone_No',
-        ]
+        report_customer_odata_params()
     );
-}
-
-$entriesFilterParts = [];
-if ($openFilter === 'open') {
-    $entriesFilterParts[] = 'Open eq true';
-} elseif ($openFilter === 'closed') {
-    $entriesFilterParts[] = 'Open eq false';
-}
-
-$entriesParams = [
-    '$select' => implode(',', [
-        'Entry_No',
-        'Posting_Date',
-        'Document_Date',
-        'Document_No',
-        'Customer_No',
-        'Customer_Name',
-        'Description',
-        'Salesperson_Code',
-        'Global_Dimension_1_Code',
-        'Global_Dimension_2_Code',
-        'Currency_Code',
-        'Remaining_Amt_LCY',
-        'Remaining_Amount',
-        'Due_Date',
-        'Closed_at_Date',
-        'External_Document_No',
-        'Your_Reference',
-        'Open',
-        'KVT_Memo',
-    ]),
-];
-
-if (!empty($entriesFilterParts)) {
-    $entriesParams['$filter'] = implode(' and ', $entriesFilterParts);
-}
-
-if ($companyDiscoveryError === '') {
     $entriesUrl = odata_company_url(
         $selectedEnvironment,
         $selectedCompany,
         'Customer_Ledger_Entries',
-        $entriesParams
+        report_ledger_odata_params($openFilter)
     );
 
-    $customers = odata_get_all($customerUrl, $auth, 3600);
-    $entries = odata_get_all($entriesUrl, $auth, 600);
+    $customers = odata_get_all($customerUrl, $auth, $cacheTtl);
+    $entries = odata_get_all($entriesUrl, $auth, $cacheTtl);
     sort_ledger_entries($entries);
 }
 

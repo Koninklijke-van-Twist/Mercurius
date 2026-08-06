@@ -13,6 +13,58 @@ function odata_company_url(string $environment, string $company, string $entity,
     return $base . $entity . $query;
 }
 
+/** Default OData file-cache TTL: 23 hours (nightly warm + page-load reuse). */
+function odata_cache_ttl_seconds(): int
+{
+    return 23 * 3600;
+}
+
+function report_customer_odata_params(): array
+{
+    return [
+        '$select' => 'No,Name,City,E_Mail,Phone_No',
+    ];
+}
+
+/**
+ * OData params for Customer_Ledger_Entries as used by index.php.
+ * $openFilter: open | closed | both
+ */
+function report_ledger_odata_params(string $openFilter = 'open'): array
+{
+    $params = [
+        '$select' => implode(',', [
+            'Entry_No',
+            'Posting_Date',
+            'Document_Date',
+            'Document_No',
+            'Customer_No',
+            'Customer_Name',
+            'Description',
+            'Salesperson_Code',
+            'Global_Dimension_1_Code',
+            'Global_Dimension_2_Code',
+            'Currency_Code',
+            'Remaining_Amt_LCY',
+            'Remaining_Amount',
+            'Due_Date',
+            'Closed_at_Date',
+            'External_Document_No',
+            'Your_Reference',
+            'Open',
+            'KVT_Memo',
+        ]),
+    ];
+
+    if ($openFilter === 'open') {
+        $params['$filter'] = 'Open eq true';
+    } elseif ($openFilter === 'closed') {
+        $params['$filter'] = 'Open eq false';
+    }
+
+    return $params;
+}
+
 function pick_amount(array $entry): float
 {
     if (isset($entry['Remaining_Amount'])) {
