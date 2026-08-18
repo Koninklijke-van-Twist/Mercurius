@@ -5,3 +5,6 @@ web/cache/
 
 BC Webservices.txt
 BC Webservices*
+
+web/analytics/analytics.sqlite
+web/analytics/analytics.sqlite-*
