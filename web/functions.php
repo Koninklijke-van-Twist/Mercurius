@@ -5,7 +5,17 @@ function odata_company_url(string $environment, string $company, string $entity,
 {
     global $baseUrl;
     $encCompany = rawurlencode($company);
-    $base = $baseUrl . $environment . "/ODataV4/Company('" . $encCompany . "')/";
+
+    // When Mímir is on, build a synthetic OData URL that odata_mimir_parse_entity_url understands.
+    // No real $baseUrl / BC environment is required.
+    if (function_exists('odata_mimir_enabled') && odata_mimir_enabled()) {
+        $env = trim($environment) !== '' ? $environment : 'mimir';
+        $base = "https://mimir.invalid/" . $env . "/ODataV4/Company('" . $encCompany . "')/";
+    } else {
+        $prefix = (isset($baseUrl) && is_string($baseUrl)) ? $baseUrl : '';
+        $base = $prefix . $environment . "/ODataV4/Company('" . $encCompany . "')/";
+    }
+
     $query = '';
     if (!empty($params)) {
         $query = '?' . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
@@ -13,11 +23,14 @@ function odata_company_url(string $environment, string $company, string $entity,
     return $base . $entity . $query;
 }
 
-/** Default OData file-cache TTL: 23 hours (nightly warm + page-load reuse). */
+/** Default OData file-cache TTL / UI Mímir max_age: 23 hours (page-load reuse). */
 function odata_cache_ttl_seconds(): int
 {
     return 23 * 3600;
 }
+
+/** Mímir max_age for nightly.php cache warm (4h — cache sharing, nightly still refreshes). */
+const MERCURIUS_NIGHTLY_MAX_AGE = 14400;
 
 function report_normalize_party_mode(?string $mode): string
 {

@@ -2,7 +2,7 @@
 /**
  * Nightly OData cache warm-up.
  * Called via GET by a server scheduler. Loads customers + ledger entries for all
- * companies so page loads can serve from file cache (TTL = 23 hours).
+ * companies so page loads can serve from cache. Mímir max_age = MERCURIUS_NIGHTLY_MAX_AGE (4h);
  */
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
@@ -55,7 +55,7 @@ function nightly_extend_time_limit(): void
 }
 
 $startedAt = microtime(true);
-$cacheTtl = odata_cache_ttl_seconds();
+$cacheTtl = MERCURIUS_NIGHTLY_MAX_AGE;
 $ok = 0;
 $failed = 0;
 
