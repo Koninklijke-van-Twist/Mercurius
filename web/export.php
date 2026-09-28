@@ -162,8 +162,6 @@ function csv_fetch_customers(string $selectedCompany, string $environment, array
             'KVT_Chamber_Of_Commerce_No',
             'VAT_Registration_No',
             'Preferred_Bank_Account_Code',
-            'Phone_No',
-            'E_Mail',
         ]),
     ];
 
@@ -213,9 +211,6 @@ function csv_fetch_ledger_rows(string $selectedCompany, string $environment, arr
         'Remaining_Amount',
         'Due_Date',
         'Closed_at_Date',
-        'External_Document_No',
-        'Your_Reference',
-        'Open',
         'KVT_Memo',
         'Amount',
         'Original_Amount',
