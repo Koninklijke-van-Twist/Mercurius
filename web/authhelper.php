@@ -448,7 +448,8 @@ function auth_discover_companies(bool $forceRefresh = false): array
         return $cachedResult;
     }
 
-    // Mímir: companies + environments uit Mímir API — geen $auth_list/$baseUrl nodig.
+    // Mímir eerst. odata_mimir_companies_as_rows valt bij een fout terug op de
+    // pre-Mímir BC-companylijst ($baseUrl, $auth_list, $environments, filecache).
     if (auth_mimir_enabled()) {
         $cachedResult = auth_discover_companies_via_mimir();
         return $cachedResult;

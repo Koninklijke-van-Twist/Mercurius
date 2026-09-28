@@ -2,12 +2,14 @@
 /**
  * Auth template for Mercurius.
  *
- * Prefer Mímir (no BC credentials needed):
+ * Prefer Mímir, and keep the BC block as automatic fallback when Mímir is down:
  *   $mimirApi  = 'mimir_…';  // required to activate Mímir
  *   $mimirBase = 'https://sleutels.kvt.nl/mimir/api'; // optional
  *
- * With $mimirApi set, the BC vars below are unused.
- * Without $mimirApi, keep the BC block for the legacy OData path.
+ * With $mimirApi set, fetches try Mímir first and fall back to the BC vars below.
+ * Those BC credentials ($auth_list, $environments, $baseUrl, and optional $auth / $environment)
+ * must stay in auth.php next to $mimirApi. Without them a Mímir failure is rethrown.
+ * Without $mimirApi, only the BC block is used.
  *
  * Tim must set $mimirApi (and optional $mimirBase) in auth.php locally / on server.
  * Never commit web/auth.php.
@@ -17,7 +19,7 @@
 // $mimirApi  = 'mimir_…';
 // $mimirBase = 'https://sleutels.kvt.nl/mimir/api';
 
-// --- Legacy Business Central (only when $mimirApi is not set) ---
+// --- Business Central (direct path, and fallback when Mímir fails) ---
 $auth_list =
     [
         "env1" => ['mode' => 'basic', 'user' => 'USERNAME', 'pass' => 'PASSWORD'],
