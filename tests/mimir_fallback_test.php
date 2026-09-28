@@ -367,4 +367,137 @@ if (($GLOBALS['environments'][0] ?? '') !== 'env2') {
     fail('environments uit auth.php kwam niet in $GLOBALS');
 }
 
+$onlyAuth = ['mode' => 'basic', 'user' => 'only-auth-user', 'pass' => 'only-auth-secret'];
+$mimirApi = 'mimir_test_key_should_not_leak';
+$mimirBase = 'http://127.0.0.1:9';
+$baseUrl = 'https://bc.example:7148/';
+$GLOBALS['baseUrl'] = $baseUrl;
+$environment = 'Production';
+$GLOBALS['environment'] = 'Production';
+$environments = [];
+$GLOBALS['environments'] = [];
+$auth = $onlyAuth;
+$GLOBALS['auth'] = $onlyAuth;
+unset($auth_list, $GLOBALS['auth_list']);
+$GLOBALS['companyEnvironmentMap'] = [];
+$GLOBALS['odata_bc_company_environment_map'] = [];
+
+odata_mimir_circuit_reset();
+$beforeOnlyAuth = count($calls);
+$onlyAuthNames = odata_mimir_list_companies(null);
+if ($onlyAuthNames !== $expectedNames) {
+    fail('companylijst met alleen $auth gaf ' . json_encode($onlyAuthNames));
+}
+$onlyAuthCompanyCall = $calls[$beforeOnlyAuth] ?? null;
+if (count($calls) - $beforeOnlyAuth !== 1 || !is_array($onlyAuthCompanyCall) || strpos($onlyAuthCompanyCall['url'], 'https://bc.example:7148/Production/ODataV4/Company') !== 0 || $onlyAuthCompanyCall['user'] !== 'only-auth-user') {
+    fail('companylijst zonder $auth_list moet de primaire environment met $auth bevragen: ' . json_encode(array_slice($calls, $beforeOnlyAuth)));
+}
+
+odata_mimir_circuit_reset();
+$beforeOnlyQuery = count($calls);
+$onlyQueryRows = odata_mimir_query('Unmapped Co', 'AppCustomerCard', ['$select' => 'No'], 22);
+$onlyQueryCall = $calls[$beforeOnlyQuery] ?? null;
+if (($onlyQueryRows[0]['No'] ?? '') !== 'WO-1' || !is_array($onlyQueryCall) || strpos((string) $onlyQueryCall['url'], "https://bc.example:7148/Production/ODataV4/Company('Unmapped%20Co')/AppCustomerCard?") !== 0 || $onlyQueryCall['user'] !== 'only-auth-user') {
+    fail('query met alleen $auth ging niet naar BC: ' . json_encode($onlyQueryCall));
+}
+
+odata_mimir_circuit_reset();
+$beforeOnlyFetch = count($calls);
+$onlyFetchRows = odata_get_all(
+    "https://mimir.invalid/Production/ODataV4/Company('Unmapped%20Co')/Customer_Ledger_Entries?\$select=No",
+    [],
+    23
+);
+$onlyFetchCall = $calls[$beforeOnlyFetch] ?? null;
+$expectedOnlyFetch = "https://bc.example:7148/Production/ODataV4/Company('Unmapped%20Co')/Customer_Ledger_Entries?\$select=No";
+if (($onlyFetchRows[0]['No'] ?? '') !== 'WO-1' || !is_array($onlyFetchCall) || $onlyFetchCall['url'] !== $expectedOnlyFetch || $onlyFetchCall['user'] !== 'only-auth-user') {
+    fail('URL-fetch met alleen $auth ging niet naar BC: ' . json_encode($onlyFetchCall));
+}
+
+odata_mimir_circuit_reset();
+$beforeOnlyDirectFetch = count($calls);
+odata_mimir_fetch_all(
+    "https://mimir.invalid/Production/ODataV4/Company('Unmapped%20Co')/Customer_Ledger_Entries?\$select=No",
+    24
+);
+$onlyDirectFetchCall = $calls[$beforeOnlyDirectFetch] ?? null;
+if (!is_array($onlyDirectFetchCall) || $onlyDirectFetchCall['url'] !== $expectedOnlyFetch || $onlyDirectFetchCall['user'] !== 'only-auth-user') {
+    fail('fetch_all met alleen $auth ging niet naar BC: ' . json_encode($onlyDirectFetchCall));
+}
+
+$primaryAuth = ['mode' => 'basic', 'user' => 'primary-user', 'pass' => 'primary-secret'];
+$sandboxAuth = ['mode' => 'basic', 'user' => 'sandbox-user', 'pass' => 'sandbox-secret'];
+$environment = 'Production';
+$GLOBALS['environment'] = 'Production';
+$environments = [];
+$GLOBALS['environments'] = [];
+$auth = $primaryAuth;
+$GLOBALS['auth'] = $primaryAuth;
+$auth_list = ['Sandbox' => $sandboxAuth];
+$GLOBALS['auth_list'] = $auth_list;
+$GLOBALS['companyEnvironmentMap'] = [];
+$GLOBALS['odata_bc_company_environment_map'] = [];
+odata_mimir_circuit_reset();
+$beforeUnmapped = count($calls);
+$unmappedRows = odata_get_all(
+    "https://mimir.invalid/Production/ODataV4/Company('Unmapped%20Co')/Customer_Ledger_Entries?\$select=No",
+    [],
+    19
+);
+$unmappedCall = $calls[$beforeUnmapped] ?? null;
+if (($unmappedRows[0]['No'] ?? '') !== 'WO-1' || !is_array($unmappedCall) || $unmappedCall['url'] !== $expectedOnlyFetch || $unmappedCall['user'] !== 'primary-user') {
+    fail('unmapped bedrijf in primaire environment moet $auth gebruiken, niet Sandbox: ' . json_encode($unmappedCall));
+}
+odata_mimir_circuit_reset();
+$beforeUnmappedQuery = count($calls);
+odata_mimir_query('Unmapped Co', 'AppCustomerCard', ['$select' => 'No'], 16);
+$unmappedQueryCall = $calls[$beforeUnmappedQuery] ?? null;
+if (!is_array($unmappedQueryCall) || strpos((string) $unmappedQueryCall['url'], "https://bc.example:7148/Production/ODataV4/Company('Unmapped%20Co')/AppCustomerCard?") !== 0 || $unmappedQueryCall['user'] !== 'primary-user') {
+    fail('query voor unmapped bedrijf moet $auth gebruiken, niet Sandbox: ' . json_encode($unmappedQueryCall));
+}
+
+$GLOBALS['environment'] = 'production';
+$environment = 'production';
+odata_mimir_circuit_reset();
+$beforeCase = count($calls);
+odata_get_all(
+    "https://mimir.invalid/Production/ODataV4/Company('Unmapped%20Co')/Customer_Ledger_Entries?\$select=No",
+    [],
+    11
+);
+$caseCall = $calls[$beforeCase] ?? null;
+if (!is_array($caseCall) || $caseCall['url'] !== $expectedOnlyFetch || $caseCall['user'] !== 'primary-user') {
+    fail('primaire environment moet hoofdletterongevoelig $auth gebruiken: ' . json_encode($caseCall));
+}
+
+$environment = 'Production';
+$GLOBALS['environment'] = 'Production';
+$environments = ['Production'];
+$GLOBALS['environments'] = ['Production'];
+$auth = $primaryAuth;
+$GLOBALS['auth'] = $primaryAuth;
+$auth_list = ['Production' => ['mode' => 'basic', 'user' => 'prod-list-user', 'pass' => 'prod-list-secret']];
+$GLOBALS['auth_list'] = $auth_list;
+$GLOBALS['companyEnvironmentMap'] = [];
+$GLOBALS['odata_bc_company_environment_map'] = [];
+odata_mimir_circuit_reset();
+$beforeSandbox = count($calls);
+$sandboxThrew = null;
+try {
+    odata_get_all(
+        "https://mimir.invalid/Sandbox/ODataV4/Company('Some%20Co')/Customer_Ledger_Entries?\$select=No",
+        $primaryAuth,
+        10
+    );
+    fail('Sandbox-URL zonder eigen auth_list-entry moet de Mímir-fout teruggeven');
+} catch (Throwable $exception) {
+    $sandboxThrew = $exception;
+}
+if (!$sandboxThrew instanceof Throwable || strpos($sandboxThrew->getMessage(), 'Mímir') === false) {
+    fail('Sandbox-weigering is niet de Mímir-fout: ' . ($sandboxThrew instanceof Throwable ? $sandboxThrew->getMessage() : 'geen exception'));
+}
+if (count($calls) !== $beforeSandbox) {
+    fail('Sandbox-URL mag geen BC-call doen: ' . json_encode(array_slice($calls, $beforeSandbox)));
+}
+
 echo "OK\n";
