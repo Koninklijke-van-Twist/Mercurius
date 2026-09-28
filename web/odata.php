@@ -443,23 +443,51 @@ function odata_bc_environment_for_request(string $url, ?string $company = null):
 }
 
 /**
- * Bij een bekende environment hoort $auth_list[$env]. $auth / de primaire env alleen als het bedrijf onbekend is.
+ * Credentials voor een direct-BC-pad.
+ * Een eigen bruikbare $auth_list-entry wint. Anders $auth (of meegegeven bruikbare
+ * credentials) als $auth_list ontbreekt of leeg is, of als het environment de primaire
+ * $environment is (hoofdletterongevoelig). Een ander environment zonder entry, terwijl
+ * $auth_list gevuld is, geeft null; de aanroeper gooit dan de oorspronkelijke Mímir-fout.
  *
+ * @param bool $environmentKnown Aanroepers geven door of het environment uit de URL of company-map komt.
  * @return array<string, mixed>|null
  */
 function odata_bc_auth_for_resolved_environment(?string $environment, bool $environmentKnown, array $passed): ?array
 {
-    global $auth_list;
-    if ($environmentKnown && $environment !== null && isset($auth_list) && is_array($auth_list) && isset($auth_list[$environment]) && odata_auth_is_usable($auth_list[$environment])) {
-        return $auth_list[$environment];
+    global $auth, $auth_list;
+
+    $name = $environment !== null ? trim($environment) : '';
+    $list = (isset($auth_list) && is_array($auth_list)) ? $auth_list : [];
+    if ($name !== '') {
+        if (isset($list[$name]) && odata_auth_is_usable($list[$name])) {
+            return $list[$name];
+        }
+        foreach ($list as $key => $entry) {
+            if (!is_string($key) || strcasecmp(trim($key), $name) !== 0) {
+                continue;
+            }
+            if (odata_auth_is_usable($entry)) {
+                return $entry;
+            }
+        }
     }
-    if ($environmentKnown) {
+
+    $primary = '';
+    if (isset($GLOBALS['environment']) && is_string($GLOBALS['environment'])) {
+        $primary = trim($GLOBALS['environment']);
+    }
+    $listEmpty = ($list === []);
+    $isPrimary = ($name !== '' && $primary !== '' && strcasecmp($name, $primary) === 0);
+    if (!$listEmpty && !$isPrimary && ($name !== '' || $environmentKnown)) {
         return null;
     }
     if (odata_auth_is_usable($passed)) {
         return $passed;
     }
-    return odata_bc_auth_for_fallback([]);
+    if (isset($auth) && odata_auth_is_usable($auth)) {
+        return $auth;
+    }
+    return null;
 }
 
 function odata_mimir_log_fallback(Throwable $exception): void
@@ -712,6 +740,7 @@ function odata_mimir_companies_as_rows_impl(?string $environment = null): array
 /**
  * Directe BC-companylijst via de pre-Mímir OData-route ({base}/{env}/ODataV4/Company).
  * Zonder filter worden alle environments uit auth.php bevraagd.
+ * Zonder $auth_list gaat dat met $auth naar de primaire environment ($baseUrl + $environment).
  *
  * @return list<array<string, mixed>>
  */
@@ -722,6 +751,11 @@ function odata_direct_companies_as_rows(?string $environmentFilter = null): arra
         $envs = [trim($environmentFilter)];
     } else {
         $envs = odata_bc_environment_names();
+        global $auth_list, $environment;
+        $listMissing = !isset($auth_list) || !is_array($auth_list) || $auth_list === [];
+        if ($listMissing && isset($environment) && is_string($environment) && odata_bc_environment_is_real($environment)) {
+            $envs = [trim($environment)];
+        }
     }
     $base = odata_bc_base_url();
     if ($base === null || $envs === []) {
@@ -730,12 +764,8 @@ function odata_direct_companies_as_rows(?string $environmentFilter = null): arra
 
     $out = [];
     $anyAuth = false;
-    global $auth_list;
     foreach ($envs as $env) {
-        $auth = null;
-        if (isset($auth_list) && is_array($auth_list) && isset($auth_list[$env]) && odata_auth_is_usable($auth_list[$env])) {
-            $auth = $auth_list[$env];
-        }
+        $auth = odata_bc_auth_for_resolved_environment($env, true, []);
         if ($auth === null) {
             continue;
         }
