@@ -770,7 +770,7 @@ function odata_direct_companies_as_rows(?string $environmentFilter = null): arra
             continue;
         }
         $anyAuth = true;
-        $rows = odata_get_all_direct($base . odata_bc_encode_environment($env) . '/ODataV4/Company', $auth, 300);
+        $rows = odata_get_all_direct($base . odata_bc_encode_environment($env) . '/ODataV4/Company?$select=Name', $auth, 300);
         foreach ($rows as $row) {
             if (!is_array($row)) {
                 continue;
