@@ -114,8 +114,8 @@ $expectedEntityUrl = "https://bc.example:7148/Production/ODataV4/Company('Konink
 if (!is_array($entityCall) || $entityCall['url'] !== $expectedEntityUrl || $entityCall['user'] !== 'bcuser' || $entityCall['ttl'] !== 120) {
     fail('entity-fallback URL/auth/ttl klopt niet: ' . json_encode($entityCall));
 }
-if (fallback_count() < 2) {
-    fail('elke fallback moet gelogd worden, log=' . fallback_log());
+if (fallback_count() !== 1) {
+    fail('alleen de eerste Mímir-fout mag een fallback loggen, log=' . fallback_log());
 }
 $log = fallback_log();
 if (strpos($log, 'mimir_test_key_should_not_leak') !== false || strpos($log, 'bc-secret') !== false) {
@@ -233,6 +233,138 @@ if (fallback_count() !== $loggedBeforeDirect) {
 $directCall = $calls[count($calls) - 1] ?? null;
 if (($directRows[0]['No'] ?? '') !== 'WO-1' || !is_array($directCall) || $directCall['url'] !== $directOnlyUrl) {
     fail('lege $mimirApi moet de oude directe route ongewijzigd gebruiken: ' . json_encode($directCall));
+}
+
+$mimirApi = 'mimir_test_key_should_not_leak';
+$mimirBase = 'http://127.0.0.1:9';
+$baseUrl = 'https://bc.example:7148/';
+$environment = 'env1';
+$environments = ['env1', 'env2'];
+$auth = ['mode' => 'basic', 'user' => 'bcuser', 'pass' => 'bc-secret'];
+$auth_list = [
+    'env1' => $auth,
+    'env2' => ['mode' => 'basic', 'user' => 'bcuser2', 'pass' => 'bc-secret-env2'],
+];
+$GLOBALS['companyEnvironmentMap'] = [
+    'KVT Gas' => 'env1',
+    'Hunter van Twist' => 'env2',
+];
+odata_mimir_circuit_reset();
+$loggedBeforeSecond = fallback_count();
+$beforeSecond = count($calls);
+$secondRows = odata_get_all(
+    "https://mimir.invalid/mimir/ODataV4/Company('Hunter%20van%20Twist')/Customer_Ledger_Entries?\$select=No",
+    $auth,
+    33
+);
+if (($secondRows[0]['No'] ?? '') !== 'WO-1') {
+    fail('tweede-environment-fallback gaf geen rijen');
+}
+$secondCall = $calls[$beforeSecond] ?? null;
+$expectedSecondUrl = "https://bc.example:7148/env2/ODataV4/Company('Hunter%20van%20Twist')/Customer_Ledger_Entries?\$select=No";
+if (!is_array($secondCall) || $secondCall['url'] !== $expectedSecondUrl || $secondCall['user'] !== 'bcuser2' || $secondCall['ttl'] !== 33) {
+    fail('bedrijf in tweede environment gebruikte niet env2/auth_list: ' . json_encode($secondCall));
+}
+if (fallback_count() !== $loggedBeforeSecond + 1) {
+    fail('een nieuwe Mímir-fout moet precies één keer loggen, log=' . fallback_log());
+}
+$loggedWhileOpen = fallback_count();
+odata_get_all(
+    "https://mimir.invalid/mimir/ODataV4/Company('Hunter%20van%20Twist')/Customer_Ledger_Entries?\$select=No",
+    $auth,
+    33
+);
+if (fallback_count() !== $loggedWhileOpen) {
+    fail('open circuit mag niet opnieuw loggen, log=' . fallback_log());
+}
+if (strpos(fallback_log(), 'bc-secret-env2') !== false || strpos(fallback_log(), 'bc-secret') !== false) {
+    fail('log bevat een geheim na tweede-environment-fallback');
+}
+
+odata_mimir_circuit_reset();
+$beforeWin = count($calls);
+odata_get_all(
+    "https://mimir.invalid/env2/ODataV4/Company('KVT%20Gas')/Customer_Ledger_Entries?\$select=No",
+    $auth,
+    10
+);
+$winCall = $calls[$beforeWin] ?? null;
+if (!is_array($winCall) || strpos((string) $winCall['url'], "https://bc.example:7148/env2/ODataV4/Company('KVT%20Gas')/") !== 0 || $winCall['user'] !== 'bcuser2') {
+    fail('URL-environment moet boven de company-map gaan: ' . json_encode($winCall));
+}
+
+odata_mimir_circuit_reset();
+$beforeDirectQuery = count($calls);
+odata_mimir_query('KVT Gas', 'AppCustomerCard', ['$select' => 'No'], 12);
+$directQueryCall = $calls[$beforeDirectQuery] ?? null;
+if (!is_array($directQueryCall) || strpos((string) $directQueryCall['url'], "https://bc.example:7148/env1/ODataV4/Company('KVT%20Gas')/AppCustomerCard?") !== 0 || $directQueryCall['user'] !== 'bcuser') {
+    fail('odata_direct_query koos niet de environment van het bedrijf: ' . json_encode($directQueryCall));
+}
+
+odata_mimir_circuit_reset();
+$loggedBeforeCaller = fallback_count();
+$callerThrew = false;
+try {
+    odata_mimir_fetch_all('https://example.test/not-an-odata-url', 5);
+} catch (Throwable $exception) {
+    $callerThrew = true;
+}
+if (!$callerThrew) {
+    fail('een onvertaalbare URL moet een fout geven');
+}
+if (odata_mimir_circuit_open()) {
+    fail('een fout van de caller mag het circuit niet openen');
+}
+if (fallback_count() !== $loggedBeforeCaller) {
+    fail('een fout van de caller mag geen fallback loggen');
+}
+
+$GLOBALS['environment'] = 'mimir';
+$GLOBALS['environments'] = ['mimir'];
+$cacheKey = build_cache_key(
+    "https://bc.example:7148/env2/ODataV4/Company('Hunter%20van%20Twist')/Customer_Ledger_Entries",
+    ['user' => 'bcuser2']
+);
+$cacheSuffix = substr((string) strrchr($cacheKey, '|'), 1);
+if ($cacheSuffix !== 'env2' || strpos($cacheKey, '|mimir') !== false) {
+    fail('cache-key moet de echte BC-environment gebruiken, kreeg: ' . $cacheKey);
+}
+
+$authFile = tempnam(sys_get_temp_dir(), 'merc-auth');
+if ($authFile === false) {
+    fail('tijdelijk auth-bestand kon niet worden aangemaakt');
+}
+file_put_contents($authFile, <<<'PHP'
+<?php
+$baseUrl = 'https://from-auth.example/';
+$auth = ['mode' => 'basic', 'user' => 'loaded-user', 'pass' => 'loaded-secret'];
+$auth_list = ['env2' => ['mode' => 'basic', 'user' => 'loaded-user', 'pass' => 'loaded-secret']];
+$environment = 'env2';
+$environments = ['env2'];
+$base = 'from-auth-base';
+PHP
+);
+$GLOBALS['baseUrl'] = 'https://keep.example/';
+unset($GLOBALS['auth'], $GLOBALS['auth_list'], $GLOBALS['environment'], $GLOBALS['environments'], $GLOBALS['base']);
+odata_bc_load_auth_globals($authFile);
+@unlink($authFile);
+if (($GLOBALS['baseUrl'] ?? '') !== 'https://keep.example/') {
+    fail('gezette baseUrl werd overschreven: ' . (string) ($GLOBALS['baseUrl'] ?? ''));
+}
+if (($GLOBALS['environment'] ?? '') !== 'env2') {
+    fail('environment uit auth.php kwam niet in $GLOBALS');
+}
+if (($GLOBALS['auth']['user'] ?? '') !== 'loaded-user') {
+    fail('auth uit auth.php kwam niet in $GLOBALS');
+}
+if (($GLOBALS['auth_list']['env2']['user'] ?? '') !== 'loaded-user') {
+    fail('auth_list uit auth.php kwam niet in $GLOBALS');
+}
+if (($GLOBALS['base'] ?? '') !== 'from-auth-base') {
+    fail('base uit auth.php kwam niet in $GLOBALS');
+}
+if (($GLOBALS['environments'][0] ?? '') !== 'env2') {
+    fail('environments uit auth.php kwam niet in $GLOBALS');
 }
 
 echo "OK\n";
