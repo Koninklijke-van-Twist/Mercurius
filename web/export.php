@@ -217,7 +217,7 @@ function csv_fetch_ledger_rows(string $selectedCompany, string $environment, arr
         'Document_Type',
     ];
 
-    $filter = $open ? 'Open eq true' : 'Open eq false';
+    $filter = report_open_eq_filter($open);
 
     $url = odata_company_url(
         $environment,
@@ -234,14 +234,13 @@ function csv_fetch_ledger_rows(string $selectedCompany, string $environment, arr
         sort_ledger_entries($entries);
         return $entries;
     } catch (Throwable $e) {
-        $fallbackFilter = $open ? 'Open eq true' : 'Open eq false';
         $fallbackUrl = odata_company_url(
             $environment,
             $selectedCompany,
             'Customer_Ledger_Entries',
             [
                 '$select' => implode(',', $selectFields),
-                '$filter' => $fallbackFilter,
+                '$filter' => $filter,
             ]
         );
         $entries = odata_get_all($fallbackUrl, $auth, $ttl);

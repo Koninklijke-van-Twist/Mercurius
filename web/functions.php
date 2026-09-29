@@ -18,11 +18,49 @@ function odata_company_url(string $environment, string $company, string $entity,
         $base = $prefix . $environment . "/ODataV4/Company('" . $encCompany . "')/";
     }
 
+    $params = odata_company_url_params($params);
     $query = '';
     if (!empty($params)) {
         $query = '?' . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
     }
     return $base . $entity . $query;
+}
+
+/**
+ * Structured $filter arrays (Mímir JSON) become an OData $filter string in the URL.
+ * odata_mimir_query_impl turns simple Open eq true/false strings back into JSON.
+ *
+ * @param array<string, mixed> $params
+ * @return array<string, mixed>
+ */
+function odata_company_url_params(array $params): array
+{
+    if (!isset($params['$filter']) || !is_array($params['$filter'])) {
+        return $params;
+    }
+    if (!function_exists('odata_filter_to_odata_string')) {
+        throw new RuntimeException('Gestructureerd $filter vereist odata.php.');
+    }
+    $rendered = odata_filter_to_odata_string($params['$filter']);
+    if ($rendered === '') {
+        throw new RuntimeException('Gestructureerd $filter kon niet naar een OData-string worden omgezet.');
+    }
+    $params['$filter'] = $rendered;
+    return $params;
+}
+
+/**
+ * Mímir JSON-filter for the boolean Open field (open vs closed ledger rows).
+ *
+ * @return array{field: string, op: string, value: bool}
+ */
+function report_open_eq_filter(bool $open): array
+{
+    return [
+        'field' => 'Open',
+        'op' => 'eq',
+        'value' => $open,
+    ];
 }
 
 /** Default OData file-cache TTL / UI Mímir max_age: 23 hours (page-load reuse). */
@@ -31,7 +69,11 @@ function odata_cache_ttl_seconds(): int
     return 23 * 3600;
 }
 
-/** Mímir max_age for nightly.php cache warm (4h — cache sharing, nightly still refreshes). */
+/**
+ * BC file-cache TTL for nightly.php.
+ * Mímir warm-up passes forceRefresh, which sends max_age=0 so coverage is rebuilt.
+ * This TTL still applies on the direct BC fallback.
+ */
 const MERCURIUS_NIGHTLY_MAX_AGE = 14400;
 
 function report_normalize_party_mode(?string $mode): string
@@ -162,9 +204,9 @@ function report_ledger_odata_params(string $openFilter = 'open', string $mode = 
     }
 
     if ($openFilter === 'open') {
-        $params['$filter'] = 'Open eq true';
+        $params['$filter'] = report_open_eq_filter(true);
     } elseif ($openFilter === 'closed') {
-        $params['$filter'] = 'Open eq false';
+        $params['$filter'] = report_open_eq_filter(false);
     }
 
     return $params;
