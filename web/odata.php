@@ -933,16 +933,82 @@ function odata_filter_odata_literal($value): ?string
         return (string) $value;
     }
     if (is_float($value)) {
-        if (!is_finite($value)) {
-            return null;
-        }
-        $rendered = rtrim(rtrim(sprintf('%.10F', $value), '0'), '.');
-        return $rendered === '' ? '0' : $rendered;
+        return odata_filter_float_literal($value);
     }
     if (!is_string($value)) {
         return null;
     }
     return "'" . str_replace("'", "''", $value) . "'";
+}
+
+/**
+ * Shortest round-trip decimal literal for an OData $filter.
+ * Fixed formats such as %.10F turn 1e-11 into 0; %.17F turns 0.1 into a binary artifact.
+ *
+ * @return string|null
+ */
+function odata_filter_float_literal(float $value): ?string
+{
+    if (!is_finite($value)) {
+        return null;
+    }
+    $previous = ini_get('serialize_precision');
+    ini_set('serialize_precision', '-1');
+    try {
+        $encoded = json_encode($value);
+    } finally {
+        if (is_string($previous) && $previous !== '') {
+            ini_set('serialize_precision', $previous);
+        }
+    }
+    if (!is_string($encoded) || $encoded === '' || strcasecmp($encoded, 'null') === 0) {
+        return null;
+    }
+    if ($encoded === '-0') {
+        return '0';
+    }
+    if (stripos($encoded, 'e') === false) {
+        return $encoded;
+    }
+    return odata_filter_expand_decimal($encoded);
+}
+
+/**
+ * 1.0e-11 → 0.00000000001, so Business Central receives a decimal literal.
+ */
+function odata_filter_expand_decimal(string $scientific): ?string
+{
+    if (preg_match('/^(-?)(\d+)(?:\.(\d+))?e([+-]?\d+)$/i', $scientific, $match) !== 1) {
+        return null;
+    }
+    $sign = $match[1];
+    $digits = $match[2] . (isset($match[3]) ? $match[3] : '');
+    $point = strlen($match[2]) + (int) $match[4];
+    if ($point <= 0) {
+        $rendered = '0.' . str_repeat('0', -$point) . $digits;
+    } elseif ($point >= strlen($digits)) {
+        $rendered = $digits . str_repeat('0', $point - strlen($digits));
+    } else {
+        $rendered = substr($digits, 0, $point) . '.' . substr($digits, $point);
+    }
+    if (strpos($rendered, '.') !== false) {
+        $parts = explode('.', $rendered, 2);
+        $whole = ltrim($parts[0], '0');
+        $fraction = rtrim($parts[1], '0');
+        if ($whole === '') {
+            $whole = '0';
+        }
+        $rendered = $fraction === '' ? $whole : ($whole . '.' . $fraction);
+    } else {
+        $rendered = ltrim($rendered, '0');
+        if ($rendered === '') {
+            $rendered = '0';
+        }
+    }
+    if ($rendered === '0') {
+        return '0';
+    }
+    return $sign . $rendered;
 }
 
 /**

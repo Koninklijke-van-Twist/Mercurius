@@ -485,6 +485,20 @@ if (odata_filter_to_odata_string(report_open_eq_filter(true)) !== 'Open eq true'
 if (odata_filter_to_odata_string(report_open_eq_filter(false)) !== 'Open eq false') {
     fail('gesloten-filter moet Open eq false worden voor BC');
 }
+if (odata_filter_odata_literal(0.1) !== '0.1') {
+    fail('0.1 moet een decimaal literal blijven, kreeg: ' . json_encode(odata_filter_odata_literal(0.1)));
+}
+if (odata_filter_odata_literal(1e-11) !== '0.00000000001') {
+    fail('1e-11 mag niet naar 0 afronden, kreeg: ' . json_encode(odata_filter_odata_literal(1e-11)));
+}
+$below1e17 = odata_filter_odata_literal(1e-18);
+if ($below1e17 !== '0.000000000000000001') {
+    fail('waarde onder 1e-17 moet een decimaal literal blijven, kreeg: ' . json_encode($below1e17));
+}
+$tiny = odata_filter_odata_literal(9.999999999999999e-19);
+if (!is_string($tiny) || $tiny === '0' || stripos($tiny, 'e') !== false) {
+    fail('waarde onder 1e-17 mag niet 0 of wetenschappelijke notatie worden, kreeg: ' . json_encode($tiny));
+}
 
 $openBody = odata_mimir_query_body('KVT Gas', 'Customer_Ledger_Entries', [
     '$select' => 'Entry_No,Open',
