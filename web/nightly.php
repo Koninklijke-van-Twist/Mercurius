@@ -2,7 +2,10 @@
 /**
  * Nightly OData cache warm-up.
  * Called via GET by a server scheduler. Loads customers + ledger entries for all
- * companies so page loads can serve from cache. Mímir max_age = MERCURIUS_NIGHTLY_MAX_AGE (4h);
+ * companies so page loads can serve from cache.
+ * forceRefresh sends Mímir max_age=0 (rebuild AppCustomerCard + ledger coverage).
+ * Open/closed ledger queries use a structured Open-filter (report_ledger_odata_params);
+ * "both" stays unfiltered. BC fallback still uses MERCURIUS_NIGHTLY_MAX_AGE as file-cache TTL.
  */
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);

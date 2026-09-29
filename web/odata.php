@@ -856,8 +856,257 @@ function odata_mimir_company_environment_map(?string $environment = null): array
 }
 
 /**
+ * Render a Mímir JSON filter leaf (or a small and/or tree) as an OData $filter.
+ * Strings pass through. Empty string means the value cannot be expressed.
+ *
+ * @param mixed $filter
+ */
+function odata_filter_to_odata_string($filter): string
+{
+    if (is_string($filter)) {
+        return trim($filter);
+    }
+    if (!is_array($filter)) {
+        return '';
+    }
+    if (isset($filter['field'], $filter['op']) && array_key_exists('value', $filter)
+        && !isset($filter['and']) && !isset($filter['or']) && !isset($filter['xor'])) {
+        return odata_filter_leaf_to_odata_string($filter);
+    }
+    foreach (['and' => ' and ', 'or' => ' or '] as $key => $glue) {
+        if (!isset($filter[$key]) || !is_array($filter[$key])) {
+            continue;
+        }
+        $parts = [];
+        foreach ($filter[$key] as $child) {
+            $part = odata_filter_to_odata_string($child);
+            if ($part === '') {
+                return '';
+            }
+            $parts[] = '(' . $part . ')';
+        }
+        if ($parts === []) {
+            return '';
+        }
+        return implode($glue, $parts);
+    }
+    return '';
+}
+
+/**
+ * @param array<string, mixed> $leaf
+ */
+function odata_filter_leaf_to_odata_string(array $leaf): string
+{
+    $field = trim((string) ($leaf['field'] ?? ''));
+    $op = strtolower(trim((string) ($leaf['op'] ?? '')));
+    if ($field === '' || preg_match('/^[A-Za-z_][A-Za-z0-9_.]*$/', $field) !== 1) {
+        return '';
+    }
+    $compare = ['eq', 'ne', 'gt', 'ge', 'lt', 'le'];
+    $functions = ['contains', 'startswith', 'endswith'];
+    if (!in_array($op, $compare, true) && !in_array($op, $functions, true)) {
+        return '';
+    }
+    $literal = odata_filter_odata_literal($leaf['value'] ?? null);
+    if ($literal === null) {
+        return '';
+    }
+    if (in_array($op, $functions, true)) {
+        return $op . '(' . $field . ',' . $literal . ')';
+    }
+    return $field . ' ' . $op . ' ' . $literal;
+}
+
+/**
+ * @param mixed $value
+ */
+function odata_filter_odata_literal($value): ?string
+{
+    if (is_bool($value)) {
+        return $value ? 'true' : 'false';
+    }
+    if ($value === null) {
+        return 'null';
+    }
+    if (is_int($value)) {
+        return (string) $value;
+    }
+    if (is_float($value)) {
+        return odata_filter_float_literal($value);
+    }
+    if (!is_string($value)) {
+        return null;
+    }
+    return "'" . str_replace("'", "''", $value) . "'";
+}
+
+/**
+ * Shortest round-trip decimal literal for an OData $filter.
+ * Fixed formats such as %.10F turn 1e-11 into 0; %.17F turns 0.1 into a binary artifact.
+ *
+ * @return string|null
+ */
+function odata_filter_float_literal(float $value): ?string
+{
+    if (!is_finite($value)) {
+        return null;
+    }
+    $previous = ini_get('serialize_precision');
+    ini_set('serialize_precision', '-1');
+    try {
+        $encoded = json_encode($value);
+    } finally {
+        if (is_string($previous) && $previous !== '') {
+            ini_set('serialize_precision', $previous);
+        }
+    }
+    if (!is_string($encoded) || $encoded === '' || strcasecmp($encoded, 'null') === 0) {
+        return null;
+    }
+    if ($encoded === '-0') {
+        return '0';
+    }
+    if (stripos($encoded, 'e') === false) {
+        return $encoded;
+    }
+    return odata_filter_expand_decimal($encoded);
+}
+
+/**
+ * 1.0e-11 → 0.00000000001, so Business Central receives a decimal literal.
+ */
+function odata_filter_expand_decimal(string $scientific): ?string
+{
+    if (preg_match('/^(-?)(\d+)(?:\.(\d+))?e([+-]?\d+)$/i', $scientific, $match) !== 1) {
+        return null;
+    }
+    $sign = $match[1];
+    $digits = $match[2] . (isset($match[3]) ? $match[3] : '');
+    $point = strlen($match[2]) + (int) $match[4];
+    if ($point <= 0) {
+        $rendered = '0.' . str_repeat('0', -$point) . $digits;
+    } elseif ($point >= strlen($digits)) {
+        $rendered = $digits . str_repeat('0', $point - strlen($digits));
+    } else {
+        $rendered = substr($digits, 0, $point) . '.' . substr($digits, $point);
+    }
+    if (strpos($rendered, '.') !== false) {
+        $parts = explode('.', $rendered, 2);
+        $whole = ltrim($parts[0], '0');
+        $fraction = rtrim($parts[1], '0');
+        if ($whole === '') {
+            $whole = '0';
+        }
+        $rendered = $fraction === '' ? $whole : ($whole . '.' . $fraction);
+    } else {
+        $rendered = ltrim($rendered, '0');
+        if ($rendered === '') {
+            $rendered = '0';
+        }
+    }
+    if ($rendered === '0') {
+        return '0';
+    }
+    return $sign . $rendered;
+}
+
+/**
+ * Body filter for Mímir query.php.
+ * Structured arrays are sent as JSON. The simple ledger cases "Open eq true/false"
+ * are upgraded from the opaque OData string (URL round-trip) to the same JSON leaf,
+ * so coverage-serve can match booleans locally. Other strings stay opaque.
+ *
+ * @param mixed $filter
+ * @return array<string, mixed>|string|null
+ */
+function odata_mimir_filter_for_request($filter)
+{
+    if (is_array($filter)) {
+        return $filter;
+    }
+    if (!is_string($filter) && !is_numeric($filter)) {
+        return null;
+    }
+    $text = trim((string) $filter);
+    if ($text === '') {
+        return null;
+    }
+    if (preg_match('/^Open\s+eq\s+(true|false)$/i', $text, $match) === 1) {
+        return [
+            'field' => 'Open',
+            'op' => 'eq',
+            'value' => strtolower($match[1]) === 'true',
+        ];
+    }
+    return $text;
+}
+
+/**
+ * max_age for a Mímir query. forceRefresh must miss fresh coverage (OpenAPI minimum is 0;
+ * there is no separate force flag). ttl 0 without forceRefresh keeps the previous 1h default.
+ */
+function odata_mimir_max_age_seconds(int $ttlSeconds, bool $forceRefresh): int
+{
+    if ($forceRefresh) {
+        return 0;
+    }
+    if ($ttlSeconds <= 0) {
+        return 3600;
+    }
+    return $ttlSeconds;
+}
+
+/**
+ * JSON body for POST query.php. $ttlSeconds is sent as max_age (0 is allowed).
+ *
+ * @param array<string, mixed> $odataQuery
+ * @return array<string, mixed>
+ */
+function odata_mimir_query_body(string $company, string $table, array $odataQuery, int $ttlSeconds): array
+{
+    $body = [
+        'company' => $company,
+        'table' => $table,
+        'max_age' => max(0, $ttlSeconds),
+        'top' => 0,
+    ];
+
+    $select = $odataQuery['$select'] ?? $odataQuery['select'] ?? '';
+    if (is_string($select) || is_numeric($select)) {
+        $select = trim((string) $select);
+        if ($select !== '') {
+            $cols = [];
+            foreach (explode(',', $select) as $col) {
+                $col = trim($col);
+                if ($col !== '') {
+                    $cols[] = $col;
+                }
+            }
+            if ($cols !== []) {
+                $body['select'] = $cols;
+            }
+        }
+    }
+
+    $rawFilter = null;
+    if (array_key_exists('$filter', $odataQuery)) {
+        $rawFilter = $odataQuery['$filter'];
+    } elseif (array_key_exists('filter', $odataQuery)) {
+        $rawFilter = $odataQuery['filter'];
+    }
+    $filter = odata_mimir_filter_for_request($rawFilter);
+    if ($filter !== null) {
+        $body['filter'] = $filter;
+    }
+
+    return $body;
+}
+
+/**
  * Directe company/table-query via Mímir — geen BC-URL nodig.
  * $odataQuery gebruikt OData-keys zoals $select / $filter.
+ * $filter mag een OData-string of een gestructureerd Mímir-filter zijn.
  *
  * @param array<string, mixed> $odataQuery
  * @return list<array<string, mixed>>
@@ -866,31 +1115,7 @@ function odata_mimir_query_impl(string $company, string $table, array $odataQuer
 {
     consolelog("Mímir query company=$company table=$table\n");
 
-    $body = [
-        'company' => $company,
-        'table' => $table,
-        'max_age' => max(0, $ttlSeconds),
-        'top' => 0,
-    ];
-
-    $select = trim((string) ($odataQuery['$select'] ?? $odataQuery['select'] ?? ''));
-    if ($select !== '') {
-        $cols = [];
-        foreach (explode(',', $select) as $col) {
-            $col = trim($col);
-            if ($col !== '') {
-                $cols[] = $col;
-            }
-        }
-        if ($cols !== []) {
-            $body['select'] = $cols;
-        }
-    }
-
-    $filter = trim((string) ($odataQuery['$filter'] ?? $odataQuery['filter'] ?? ''));
-    if ($filter !== '') {
-        $body['filter'] = $filter;
-    }
+    $body = odata_mimir_query_body($company, $table, $odataQuery, $ttlSeconds);
 
     $response = odata_mimir_request('POST', 'query.php', $body);
     if (!isset($response['value']) || !is_array($response['value'])) {
@@ -923,7 +1148,17 @@ function odata_direct_query(string $company, string $table, array $odataQuery, i
         if (!array_key_exists($key, $odataQuery)) {
             continue;
         }
-        $value = trim((string) $odataQuery[$key]);
+        $value = $odataQuery[$key];
+        if (($key === '$filter' || $key === 'filter') && is_array($value)) {
+            $value = odata_filter_to_odata_string($value);
+            if ($value === '') {
+                throw new Exception('Gestructureerd OData-filter kon niet naar een $filter-string worden omgezet.');
+            }
+        }
+        if (!is_string($value) && !is_numeric($value)) {
+            continue;
+        }
+        $value = trim((string) $value);
         if ($value === '') {
             continue;
         }
@@ -1037,9 +1272,11 @@ function odata_get_all(string $url, array $auth, $ttlSeconds = 300, bool $forceR
 
     if (odata_mimir_enabled()) {
         return odata_mimir_or_direct(
-            static function () use ($url, $ttlSeconds): array {
-                // Mímir beheert de BC-cache (max_age); Mercurius-filecache / forceRefresh worden overgeslagen.
-                return odata_mimir_fetch_all_impl($url, $ttlSeconds === 0 ? 3600 : $ttlSeconds);
+            static function () use ($url, $ttlSeconds, $forceRefresh): array {
+                // forceRefresh → max_age=0, zodat Mímir verse dekking bij BC moet ophalen.
+                // Zonder forceRefresh blijft ttl 0 de oude default van 3600.
+                $maxAge = odata_mimir_max_age_seconds($ttlSeconds, $forceRefresh);
+                return odata_mimir_fetch_all_impl($url, $maxAge);
             },
             static function () use ($url, $auth, $ttlSeconds, $forceRefresh): array {
                 $directUrl = odata_bc_url_from_odata_url($url);

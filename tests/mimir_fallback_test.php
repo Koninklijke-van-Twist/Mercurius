@@ -470,6 +470,105 @@ if (!is_array($caseCall) || $caseCall['url'] !== $expectedOnlyFetch || $caseCall
     fail('primaire environment moet hoofdletterongevoelig $auth gebruiken: ' . json_encode($caseCall));
 }
 
+if (odata_mimir_max_age_seconds(14400, true) !== 0) {
+    fail('forceRefresh moet max_age 0 naar Mímir sturen');
+}
+if (odata_mimir_max_age_seconds(14400, false) !== 14400) {
+    fail('zonder forceRefresh blijft de opgegeven max_age staan');
+}
+if (odata_mimir_max_age_seconds(0, false) !== 3600) {
+    fail('ttl 0 zonder forceRefresh moet de oude default 3600 houden');
+}
+if (odata_filter_to_odata_string(report_open_eq_filter(true)) !== 'Open eq true') {
+    fail('open-filter moet Open eq true worden voor BC');
+}
+if (odata_filter_to_odata_string(report_open_eq_filter(false)) !== 'Open eq false') {
+    fail('gesloten-filter moet Open eq false worden voor BC');
+}
+if (odata_filter_odata_literal(0.1) !== '0.1') {
+    fail('0.1 moet een decimaal literal blijven, kreeg: ' . json_encode(odata_filter_odata_literal(0.1)));
+}
+if (odata_filter_odata_literal(1e-11) !== '0.00000000001') {
+    fail('1e-11 mag niet naar 0 afronden, kreeg: ' . json_encode(odata_filter_odata_literal(1e-11)));
+}
+$below1e17 = odata_filter_odata_literal(1e-18);
+if ($below1e17 !== '0.000000000000000001') {
+    fail('waarde onder 1e-17 moet een decimaal literal blijven, kreeg: ' . json_encode($below1e17));
+}
+$tiny = odata_filter_odata_literal(9.999999999999999e-19);
+if (!is_string($tiny) || $tiny === '0' || stripos($tiny, 'e') !== false) {
+    fail('waarde onder 1e-17 mag niet 0 of wetenschappelijke notatie worden, kreeg: ' . json_encode($tiny));
+}
+
+$openBody = odata_mimir_query_body('KVT Gas', 'Customer_Ledger_Entries', [
+    '$select' => 'Entry_No,Open',
+    '$filter' => report_open_eq_filter(true),
+], 0);
+if (($openBody['max_age'] ?? null) !== 0) {
+    fail('query-body moet max_age 0 bewaren, kreeg: ' . json_encode($openBody));
+}
+if (($openBody['filter'] ?? null) !== ['field' => 'Open', 'op' => 'eq', 'value' => true]) {
+    fail('gestructureerd open-filter moet als JSON-leaf naar Mímir, kreeg: ' . json_encode($openBody['filter'] ?? null));
+}
+$closedFromString = odata_mimir_filter_for_request('Open eq false');
+if ($closedFromString !== ['field' => 'Open', 'op' => 'eq', 'value' => false]) {
+    fail('Open eq false uit de URL moet een JSON-leaf worden, kreeg: ' . json_encode($closedFromString));
+}
+$opaque = odata_mimir_filter_for_request("No eq '1'");
+if ($opaque !== "No eq '1'") {
+    fail('andere $filter-strings moeten opaque blijven, kreeg: ' . json_encode($opaque));
+}
+$bothParams = report_ledger_odata_params('both', 'debiteuren');
+if (array_key_exists('$filter', $bothParams)) {
+    fail('both mag geen Open-filter zetten');
+}
+$openParams = report_ledger_odata_params('open', 'crediteuren');
+if (($openParams['$filter'] ?? null) !== report_open_eq_filter(true)) {
+    fail('crediteuren open moet het gestructureerde Open-filter gebruiken');
+}
+
+$roundTripUrl = odata_company_url(
+    'Production',
+    'KVT Gas',
+    'Customer_Ledger_Entries',
+    report_ledger_odata_params('closed', 'debiteuren')
+);
+if (strpos($roundTripUrl, 'Open%20eq%20false') === false && strpos($roundTripUrl, 'Open+eq+false') === false) {
+    fail('company-URL moet het gesloten filter als OData-string bevatten, kreeg: ' . $roundTripUrl);
+}
+$roundTrip = odata_mimir_parse_entity_url($roundTripUrl);
+$roundTripFilter = is_array($roundTrip) ? odata_mimir_filter_for_request($roundTrip['query']['$filter'] ?? null) : null;
+if ($roundTripFilter !== ['field' => 'Open', 'op' => 'eq', 'value' => false]) {
+    fail('URL-roundtrip moet weer een JSON-leaf voor Mímir worden, kreeg: ' . json_encode($roundTripFilter));
+}
+
+odata_mimir_circuit_reset();
+$mimirApi = 'mimir_test_key_should_not_leak';
+$mimirBase = 'http://127.0.0.1:9';
+$baseUrl = 'https://bc.example:7148/';
+$GLOBALS['baseUrl'] = $baseUrl;
+$environment = 'Production';
+$GLOBALS['environment'] = 'Production';
+$environments = ['Production'];
+$GLOBALS['environments'] = ['Production'];
+$auth = ['mode' => 'basic', 'user' => 'bcuser', 'pass' => 'bc-secret'];
+$GLOBALS['auth'] = $auth;
+$auth_list = ['Production' => $auth];
+$GLOBALS['auth_list'] = $auth_list;
+$GLOBALS['companyEnvironmentMap'] = ['KVT Gas' => 'Production'];
+$GLOBALS['odata_bc_company_environment_map'] = ['KVT Gas' => 'Production'];
+$beforeStructured = count($calls);
+odata_mimir_query('KVT Gas', 'Customer_Ledger_Entries', [
+    '$select' => 'Entry_No',
+    '$filter' => report_open_eq_filter(true),
+], 9);
+$structuredCall = $calls[$beforeStructured] ?? null;
+$structuredUrl = is_array($structuredCall) ? (string) $structuredCall['url'] : '';
+if (strpos($structuredUrl, "https://bc.example:7148/Production/ODataV4/Company('KVT%20Gas')/Customer_Ledger_Entries?") !== 0
+    || (strpos($structuredUrl, 'Open%20eq%20true') === false && strpos($structuredUrl, 'Open+eq+true') === false)) {
+    fail('BC-fallback zette het gestructureerde Open-filter niet terug naar $filter: ' . json_encode($structuredCall));
+}
+
 $environment = 'Production';
 $GLOBALS['environment'] = 'Production';
 $environments = ['Production'];
