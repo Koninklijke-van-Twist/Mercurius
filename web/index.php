@@ -45,12 +45,16 @@ try {
         $sessionCompany = trim((string) ($_SESSION['selected_company'] ?? ''));
     }
 
-    if ($requestedCompany !== '' && in_array($requestedCompany, $companies, true)) {
-        $selectedCompany = $requestedCompany;
-    } elseif ($sessionCompany !== '' && in_array($sessionCompany, $companies, true)) {
-        $selectedCompany = $sessionCompany;
-    } else {
-        $selectedCompany = $companies[0];
+    $currentUserEmail = mercurius_current_user_email();
+    $selectedCompany = mercurius_pick_company(
+        $companies,
+        $requestedCompany,
+        $currentUserEmail !== '' ? mercurius_user_pref_company($currentUserEmail) : '',
+        $sessionCompany
+    );
+    $companyFromUrl = $requestedCompany !== '' && $requestedCompany === $selectedCompany;
+    if ($companyFromUrl && !$isMailReport && $currentUserEmail !== '') {
+        mercurius_user_pref_set_company($currentUserEmail, $selectedCompany);
     }
 
     $selectedEnvironment = getEnvironmentForCompany($selectedCompany);
@@ -864,21 +868,22 @@ if (isset($isMailReport) && $isMailReport) {
                 <div class="refresh-area">
                     <?php if ($actualiserenActive): ?>
                         <?php
-                        $refreshMeta = odata_mimir_request_meta();
-                        $refreshLive = 0;
-                        $refreshCached = 0;
-                        foreach ($refreshMeta as $refreshItem) {
-                            $refreshLive += (int) ($refreshItem['from_live'] ?? 0);
-                            $refreshCached += (int) ($refreshItem['from_cache'] ?? 0);
-                        }
+                        $refreshStats = odata_request_stats();
+                        $refreshLive = (int) $refreshStats['mimir_live'] + (int) $refreshStats['direct_live'];
+                        $refreshCached = (int) $refreshStats['mimir_cache'] + (int) $refreshStats['direct_cache'];
                         $refreshAt = new DateTime('now', new DateTimeZone('Europe/Amsterdam'));
-                        $refreshTitle = 'Live opgehaald uit Business Central op ' . $refreshAt->format('d-m-Y H:i:s');
-                        if ($refreshMeta !== []) {
-                            $refreshTitle .= ' (Mímir: ' . $refreshLive . ' rijen live, ' . $refreshCached . ' uit cache)';
+                        $refreshTitle = 'Live opgehaald uit Business Central op ' . $refreshAt->format('d-m-Y H:i:s')
+                            . ': ' . $refreshLive . ' rijen live, ' . $refreshCached . ' uit cache.';
+                        if ((int) $refreshStats['mimir_calls'] > 0) {
+                            $refreshTitle .= ' Via Mímir: ' . (int) $refreshStats['mimir_live'] . ' live, ' . (int) $refreshStats['mimir_cache'] . ' uit cache.';
+                        }
+                        if ($refreshStats['fallback_errors'] !== []) {
+                            $refreshTitle .= ' Mímir faalde (' . $refreshStats['fallback_errors'][0] . '); ' . (int) $refreshStats['direct_live'] . ' rijen direct uit Business Central.';
                         }
                         ?>
                         <span class="refresh-note" title="<?= htmlspecialchars($refreshTitle) ?>"
-                            data-mimir-from-live="<?= (int) $refreshLive ?>" data-mimir-from-cache="<?= (int) $refreshCached ?>">Live bijgewerkt om <?= htmlspecialchars($refreshAt->format('H:i')) ?></span>
+                            data-mimir-from-live="<?= (int) $refreshStats['mimir_live'] ?>" data-mimir-from-cache="<?= (int) $refreshStats['mimir_cache'] ?>"
+                            data-bc-direct-live="<?= (int) $refreshStats['direct_live'] ?>" data-mimir-fallback="<?= $refreshStats['fallback_errors'] !== [] ? '1' : '0' ?>">Live bijgewerkt om <?= htmlspecialchars($refreshAt->format('H:i')) ?><?= $refreshStats['fallback_errors'] !== [] ? ' (direct uit BC)' : '' ?></span>
                     <?php endif; ?>
                     <button type="button" id="refreshButton" class="refresh-button">Actualiseren</button>
                 </div>
@@ -1103,9 +1108,21 @@ if (isset($isMailReport) && $isMailReport) {
                 try
                 {
                     const url = new URL(window.location.href);
+                    let changed = false;
                     if (url.searchParams.has('actualiseren'))
                     {
                         url.searchParams.delete('actualiseren');
+                        changed = true;
+                    }
+                    // Automatisch gekozen bedrijf in de URL zetten, zodat F5 en gedeelde links hetzelfde tonen.
+                    const selectedCompany = <?= json_encode($selectedCompany, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+                    if (selectedCompany !== '' && (url.searchParams.get('company') || '') === '')
+                    {
+                        url.searchParams.set('company', selectedCompany);
+                        changed = true;
+                    }
+                    if (changed)
+                    {
                         window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
                     }
                 }

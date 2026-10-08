@@ -566,3 +566,91 @@ function format_memo_html(string $memo, array $memoTooltipTerms, array $baseQuer
 
     return implode('<br/>', $resultLines);
 }
+
+/**
+ * Laatst gekozen bedrijf per gebruiker (los van de sessie), in web/cache zodat de
+ * FTP-deploy het bestand laat staan. Sleutel is een hash van het e-mailadres.
+ */
+function mercurius_user_prefs_path(): string
+{
+    $dir = __DIR__ . DIRECTORY_SEPARATOR . 'cache';
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0777, true);
+    }
+    return $dir . DIRECTORY_SEPARATOR . 'user_prefs.json';
+}
+
+function mercurius_user_pref_key(string $email): string
+{
+    return hash('sha256', strtolower(trim($email)));
+}
+
+function mercurius_current_user_email(): string
+{
+    if (isset($_SESSION) && is_array($_SESSION) && isset($_SESSION['user']) && is_array($_SESSION['user'])) {
+        return strtolower(trim((string) ($_SESSION['user']['email'] ?? '')));
+    }
+    return '';
+}
+
+function mercurius_user_pref_company(string $email): string
+{
+    if (trim($email) === '') {
+        return '';
+    }
+    $raw = @file_get_contents(mercurius_user_prefs_path());
+    $map = is_string($raw) && $raw !== '' ? json_decode($raw, true) : [];
+    if (!is_array($map)) {
+        return '';
+    }
+    $entry = $map[mercurius_user_pref_key($email)] ?? null;
+    return is_array($entry) ? trim((string) ($entry['company'] ?? '')) : '';
+}
+
+function mercurius_user_pref_set_company(string $email, string $company): void
+{
+    $email = trim($email);
+    $company = trim($company);
+    if ($email === '' || $company === '' || mercurius_user_pref_company($email) === $company) {
+        return;
+    }
+    $handle = @fopen(mercurius_user_prefs_path(), 'c+');
+    if ($handle === false) {
+        return;
+    }
+    try {
+        if (!@flock($handle, LOCK_EX)) {
+            return;
+        }
+        $raw = stream_get_contents($handle);
+        $map = is_string($raw) && $raw !== '' ? json_decode($raw, true) : [];
+        if (!is_array($map)) {
+            $map = [];
+        }
+        $map[mercurius_user_pref_key($email)] = ['company' => $company, 'updated_at' => time()];
+        ftruncate($handle, 0);
+        rewind($handle);
+        fwrite($handle, (string) json_encode($map, JSON_UNESCAPED_UNICODE));
+        fflush($handle);
+        flock($handle, LOCK_UN);
+    } finally {
+        fclose($handle);
+    }
+}
+
+/**
+ * Bedrijfskeuze: ?company= > laatst gekozen bedrijf van de gebruiker > sessie >
+ * Koninklijke van Twist (standaard, zoals in Argus) > eerste bedrijf uit de lijst.
+ *
+ * @param list<string> $companies
+ */
+function mercurius_pick_company(array $companies, string $requested, string $userPref, string $sessionCompany): string
+{
+    foreach ([$requested, $userPref, $sessionCompany, 'Koninklijke van Twist'] as $candidate) {
+        $candidate = trim($candidate);
+        if ($candidate !== '' && in_array($candidate, $companies, true)) {
+            return $candidate;
+        }
+    }
+    return $companies !== [] ? (string) $companies[0] : '';
+}

@@ -109,7 +109,19 @@ function odata_mimir_timeout_seconds_for_sapi(string $sapi): int
 
 function odata_mimir_timeout_seconds(): int
 {
-    return odata_mimir_timeout_seconds_for_sapi(PHP_SAPI);
+    $seconds = odata_mimir_timeout_seconds_for_sapi(PHP_SAPI);
+    // Actualiseren laat Mímir alles live bij BC ophalen; dat duurt langer dan 90 s.
+    // Een timeout liet Mercurius eerder terugvallen op directe BC, waardoor Mímirs cache
+    // oud bleef en een gewone load daarna de nieuwe posten weer miste.
+    if (odata_force_refresh_active()) {
+        $seconds = max($seconds, odata_mimir_force_refresh_timeout_seconds());
+    }
+    return $seconds;
+}
+
+function odata_mimir_force_refresh_timeout_seconds(): int
+{
+    return 300;
 }
 
 class OdataMimirException extends Exception
@@ -492,7 +504,14 @@ function odata_bc_auth_for_resolved_environment(?string $environment, bool $envi
 
 function odata_mimir_log_fallback(Throwable $exception): void
 {
-    $message = $exception->getMessage();
+    $message = odata_mimir_sanitize_message($exception->getMessage());
+    $stats = &odata_request_stats();
+    $stats['fallback_errors'][] = $message;
+    error_log('[Mercurius] Mímir failed, falling back to direct OData: ' . $message);
+}
+
+function odata_mimir_sanitize_message(string $message): string
+{
     $redactions = [];
     $apiKey = odata_mimir_api_key();
     if ($apiKey !== '') {
@@ -516,7 +535,7 @@ function odata_mimir_log_fallback(Throwable $exception): void
     if (is_string($sanitized)) {
         $message = $sanitized;
     }
-    error_log('[Mercurius] Mímir failed, falling back to direct OData: ' . $message);
+    return $message;
 }
 
 function odata_mimir_rethrow_original(): void
@@ -1076,6 +1095,32 @@ function odata_force_refresh_requested(array $query, array $server): bool
 }
 
 /**
+ * Tellers voor dit PHP-verzoek: rijen uit Mímir (live/cache), rijen van de directe
+ * BC-route (live/lokale filecache) en Mímir-fouten die tot een fallback leidden.
+ *
+ * @return array{mimir_calls: int, mimir_live: int, mimir_cache: int, direct_live: int, direct_cache: int, fallback_errors: list<string>}
+ */
+function &odata_request_stats(): array
+{
+    if (!isset($GLOBALS['MERCURIUS_REQUEST_STATS']) || !is_array($GLOBALS['MERCURIUS_REQUEST_STATS'])) {
+        $GLOBALS['MERCURIUS_REQUEST_STATS'] = [
+            'mimir_calls' => 0,
+            'mimir_live' => 0,
+            'mimir_cache' => 0,
+            'direct_live' => 0,
+            'direct_cache' => 0,
+            'fallback_errors' => [],
+        ];
+    }
+    return $GLOBALS['MERCURIUS_REQUEST_STATS'];
+}
+
+function odata_request_stats_reset(): void
+{
+    unset($GLOBALS['MERCURIUS_REQUEST_STATS'], $GLOBALS['MERCURIUS_MIMIR_META']);
+}
+
+/**
  * Verzamelt meta uit Mímir query-antwoorden van dit verzoek (voor de Actualiseren-melding).
  *
  * @param array<string, mixed> $meta
@@ -1095,6 +1140,10 @@ function odata_mimir_remember_meta(string $company, string $table, array $meta):
         'fetched_at_max' => isset($meta['fetched_at_max']) ? (int) $meta['fetched_at_max'] : null,
         'source' => isset($meta['source']) && is_string($meta['source']) ? $meta['source'] : null,
     ];
+    $stats = &odata_request_stats();
+    $stats['mimir_calls']++;
+    $stats['mimir_live'] += max(0, (int) ($meta['from_live'] ?? 0));
+    $stats['mimir_cache'] += max(0, (int) ($meta['from_cache'] ?? 0));
 }
 
 /**
@@ -1333,6 +1382,85 @@ if (odata_mimir_enabled()) {
     }
 }
 
+function odata_mimir_freshness_floor_path(): string
+{
+    return cache_base_dir() . DIRECTORY_SEPARATOR . 'mimir_freshness_floor.json';
+}
+
+/**
+ * @param callable(array<string, int>): array<string, int> $mutate
+ * @return array<string, int>
+ */
+function odata_mimir_freshness_floor_update(?callable $mutate): array
+{
+    $path = odata_mimir_freshness_floor_path();
+    $handle = @fopen($path, 'c+');
+    if ($handle === false) {
+        return [];
+    }
+    try {
+        if (!@flock($handle, $mutate === null ? LOCK_SH : LOCK_EX)) {
+            return [];
+        }
+        $raw = stream_get_contents($handle);
+        $map = is_string($raw) && $raw !== '' ? json_decode($raw, true) : [];
+        if (!is_array($map)) {
+            $map = [];
+        }
+        $clean = [];
+        $now = time();
+        foreach ($map as $key => $at) {
+            // Na een dag is de Mímir-TTL (23 u) sowieso verstreken.
+            if (is_string($key) && is_int($at) && $at > $now - 86400) {
+                $clean[$key] = $at;
+            }
+        }
+        if ($mutate !== null) {
+            $clean = $mutate($clean);
+            ftruncate($handle, 0);
+            rewind($handle);
+            fwrite($handle, (string) json_encode($clean));
+            fflush($handle);
+        }
+        flock($handle, LOCK_UN);
+        return $clean;
+    } finally {
+        fclose($handle);
+    }
+}
+
+function odata_mimir_freshness_floor_key(string $url): string
+{
+    return hash('sha256', $url);
+}
+
+function odata_mimir_freshness_floor_get(string $url): int
+{
+    $map = odata_mimir_freshness_floor_update(null);
+    return (int) ($map[odata_mimir_freshness_floor_key($url)] ?? 0);
+}
+
+function odata_mimir_freshness_floor_set(string $url, int $at): void
+{
+    $key = odata_mimir_freshness_floor_key($url);
+    odata_mimir_freshness_floor_update(static function (array $map) use ($key, $at): array {
+        $map[$key] = max($at, (int) ($map[$key] ?? 0));
+        return $map;
+    });
+}
+
+function odata_mimir_freshness_floor_clear(string $url): void
+{
+    $key = odata_mimir_freshness_floor_key($url);
+    if (odata_mimir_freshness_floor_get($url) === 0) {
+        return;
+    }
+    odata_mimir_freshness_floor_update(static function (array $map) use ($key): array {
+        unset($map[$key]);
+        return $map;
+    });
+}
+
 function odata_get_all(string $url, array $auth, $ttlSeconds = 300, bool $forceRefresh = false): array
 {
     consolelog("Fetching $url\n");
@@ -1340,14 +1468,31 @@ function odata_get_all(string $url, array $auth, $ttlSeconds = 300, bool $forceR
     $forceRefresh = $forceRefresh || odata_force_refresh_active();
 
     if (odata_mimir_enabled()) {
+        $attemptAt = time();
         return odata_mimir_or_direct(
-            static function () use ($url, $ttlSeconds, $forceRefresh): array {
+            static function () use ($url, $ttlSeconds, $forceRefresh, $attemptAt): array {
                 // forceRefresh → max_age=0, zodat Mímir verse dekking bij BC moet ophalen.
                 // Zonder forceRefresh blijft ttl 0 de oude default van 3600.
                 $maxAge = odata_mimir_max_age_seconds($ttlSeconds, $forceRefresh);
-                return odata_mimir_fetch_all_impl($url, $maxAge);
+                // Viel een eerdere forced load terug op directe BC, dan is Mímirs cache voor
+                // deze query ouder dan wat de gebruiker al zag: vraag minstens zo verse data.
+                $floor = $forceRefresh ? 0 : odata_mimir_freshness_floor_get($url);
+                if ($floor > 0) {
+                    $maxAge = min($maxAge, max(0, $attemptAt - $floor));
+                }
+                $rows = odata_mimir_fetch_all_impl($url, $maxAge);
+                if ($forceRefresh || $floor > 0) {
+                    odata_mimir_freshness_floor_clear($url);
+                }
+                return $rows;
             },
-            static function () use ($url, $auth, $ttlSeconds, $forceRefresh): array {
+            static function () use ($url, $auth, $ttlSeconds, $forceRefresh, $attemptAt): array {
+                if ($forceRefresh) {
+                    // Live BC-data gaat zo de lokale filecache in, maar niet in Mímir.
+                    // Onthoud het moment, zodat volgende gewone loads Mímir om minstens
+                    // zo verse data vragen (en tot dan de lokale live-kopie als fallback hebben).
+                    odata_mimir_freshness_floor_set($url, $attemptAt);
+                }
                 $directUrl = odata_bc_url_from_odata_url($url);
                 $company = odata_bc_company_from_url($url);
                 $environmentKnown = odata_bc_environment_in_url($url) !== null || ($company !== null && odata_bc_known_company_environment($company) !== null);
@@ -1373,7 +1518,10 @@ function odata_get_all_direct(string $url, array $auth, $ttlSeconds = 300, bool 
     // Actualiseren: lokale filecache niet lezen, wel opnieuw vullen met het live antwoord.
     $forceRefresh = $forceRefresh || odata_force_refresh_active();
     if (isset($GLOBALS['MERCURIUS_ODATA_BC_FETCH']) && is_callable($GLOBALS['MERCURIUS_ODATA_BC_FETCH'])) {
-        return $GLOBALS['MERCURIUS_ODATA_BC_FETCH']($url, $auth, $ttlSeconds);
+        $hooked = $GLOBALS['MERCURIUS_ODATA_BC_FETCH']($url, $auth, $ttlSeconds);
+        $stats = &odata_request_stats();
+        $stats['direct_live'] += is_array($hooked) ? count($hooked) : 0;
+        return $hooked;
     }
 
     maybe_cleanup_expired_cache_files();
@@ -1384,6 +1532,8 @@ function odata_get_all_direct(string $url, array $auth, $ttlSeconds = 300, bool 
     if (!$forceRefresh && is_file($cachePath)) {
         $cached = read_cache_payload($cachePath, $ttlSeconds);
         if ($cached['valid']) {
+            $stats = &odata_request_stats();
+            $stats['direct_cache'] += is_array($cached['data']) ? count($cached['data']) : 0;
             return $cached['data'];
         }
 
@@ -1412,6 +1562,8 @@ function odata_get_all_direct(string $url, array $auth, $ttlSeconds = 300, bool 
     }
 
     write_cache_json($cachePath, $all, $ttlSeconds, $url);
+    $stats = &odata_request_stats();
+    $stats['direct_live'] += count($all);
     return $all;
 }
 
