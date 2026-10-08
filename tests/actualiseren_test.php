@@ -85,4 +85,84 @@ if (!$threw) {
     fail('met Actualiseren moet de filecache overgeslagen worden (live fetch verwacht)');
 }
 
+// Stats en timeout.
+odata_request_stats_reset();
+odata_force_refresh_set(false);
+if (odata_mimir_timeout_seconds() !== odata_mimir_timeout_seconds_for_sapi(PHP_SAPI)) {
+    fail('zonder Actualiseren normale Mímir-timeout');
+}
+odata_force_refresh_set(true);
+if (odata_mimir_timeout_seconds() < 300) {
+    fail('Actualiseren moet Mímir minstens 300 s geven');
+}
+odata_force_refresh_set(false);
+odata_mimir_remember_meta('KVT', 'Customer_Ledger_Entries', ['from_live' => 5, 'from_cache' => 2]);
+$stats = odata_request_stats();
+if ($stats['mimir_live'] !== 5 || $stats['mimir_cache'] !== 2 || $stats['mimir_calls'] !== 1) {
+    fail('Mímir-tellers kloppen niet: ' . json_encode($stats));
+}
+
+// Forced load die terugvalt op directe BC zet een versheidsvloer; volgende gewone load
+// vraagt Mímir dan om data die minstens zo vers is.
+$baseUrl = 'https://bc.example/';
+$environment = 'Production';
+$auth_list = ['Production' => ['mode' => 'basic', 'user' => 'u', 'pass' => 'bc-secret']];
+$GLOBALS['baseUrl'] = $baseUrl;
+$GLOBALS['environment'] = $environment;
+$GLOBALS['auth_list'] = $auth_list;
+$GLOBALS['auth'] = $auth_list['Production'];
+$GLOBALS['MERCURIUS_ODATA_BC_FETCH'] = static function (string $url, array $auth, int $ttl): array {
+    return [['No' => 'LIVE1'], ['No' => 'LIVE2']];
+};
+@unlink(odata_mimir_freshness_floor_path());
+odata_request_stats_reset();
+odata_mimir_circuit_reset();
+$entityUrl = "https://bc.example/Production/ODataV4/Company('KVT')/CustomerList";
+odata_force_refresh_set(true);
+$rows = @odata_get_all($entityUrl, $GLOBALS['auth'], 82800);
+odata_force_refresh_set(false);
+if (count($rows) !== 2) {
+    fail('forced fallback moet de live BC-rijen geven');
+}
+$stats = odata_request_stats();
+if ($stats['direct_live'] !== 2 || $stats['fallback_errors'] === []) {
+    fail('fallback-tellers kloppen niet: ' . json_encode($stats));
+}
+$floor = odata_mimir_freshness_floor_get($entityUrl);
+if ($floor <= 0 || $floor > time()) {
+    fail('forced fallback moet een versheidsvloer zetten');
+}
+odata_mimir_freshness_floor_clear($entityUrl);
+if (odata_mimir_freshness_floor_get($entityUrl) !== 0) {
+    fail('vloer moet gewist kunnen worden');
+}
+@unlink(odata_mimir_freshness_floor_path());
+unset($GLOBALS['MERCURIUS_ODATA_BC_FETCH']);
+
+// Bedrijfskeuze.
+$list = ['Hunter van Twist', 'KVT Gas', 'Koninklijke van Twist'];
+if (mercurius_pick_company($list, '', '', '') !== 'Koninklijke van Twist') {
+    fail('zonder keuze moet Koninklijke van Twist de standaard zijn');
+}
+if (mercurius_pick_company($list, 'KVT Gas', 'Hunter van Twist', '') !== 'KVT Gas') {
+    fail('?company= wint');
+}
+if (mercurius_pick_company($list, 'Onbekend', 'Hunter van Twist', 'KVT Gas') !== 'Hunter van Twist') {
+    fail('laatst gekozen bedrijf van de gebruiker wint van sessie');
+}
+if (mercurius_pick_company(['B', 'A'], '', '', '') !== 'B') {
+    fail('zonder KVT het eerste bedrijf');
+}
+$prefsPath = mercurius_user_prefs_path();
+$prefsBefore = is_file($prefsPath) ? file_get_contents($prefsPath) : null;
+mercurius_user_pref_set_company('Test@KVT.nl', 'KVT Gas');
+if (mercurius_user_pref_company('test@kvt.nl') !== 'KVT Gas') {
+    fail('voorkeur per gebruiker moet bewaard worden');
+}
+if ($prefsBefore === null) {
+    @unlink($prefsPath);
+} else {
+    file_put_contents($prefsPath, $prefsBefore);
+}
+
 echo "OK actualiseren\n";

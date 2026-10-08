@@ -16,7 +16,18 @@ With `$mimirApi` set, OData fetches and company discovery try Mímir first. UI a
 
 ## Actualiseren
 
-Rechtsboven in het overzicht (`web/index.php`) staat de knop **Actualiseren** (vervangt de oude cachewidget). Na bevestigen in de modal laadt de pagina opnieuw met de eenmalige parameter `?actualiseren=1`. In die paginaload stuurt elke Mímir `query.php`-aanroep `max_age` 0 (Mímir haalt live bij Business Central op en slaat het resultaat weer op), en de directe BC-fallback leest de lokale odata-filecache niet (maar schrijft het verse antwoord wel weg). Daarna haalt JavaScript de parameter uit de URL (`history.replaceState`), zodat F5 weer de normale TTL gebruikt. Een navigatie vanaf een andere site (`Sec-Fetch-Site: cross-site`/`same-site`) forceert niets. De bedrijvenlijst (Mímir `companies.php`) heeft geen force-optie en komt uit Mímirs nightly-cache.
+Rechtsboven in het overzicht (`web/index.php`) staat de knop **Actualiseren** (vervangt de oude cachewidget). Na bevestigen in de modal laadt de pagina opnieuw met de eenmalige parameter `?actualiseren=1`. In die paginaload:
+
+- stuurt elke Mímir `query.php`-aanroep `max_age` 0. Mímir haalt dan live bij Business Central op en slaat het resultaat weer op. Een gewone load daarna (`max_age` 82800) krijgt die verse rijen uit Mímirs cache.
+- krijgt Mímir een timeout van 300 s in plaats van 90 s, omdat live ophalen lang kan duren.
+- leest de directe BC-fallback de lokale odata-filecache niet, maar schrijft het verse antwoord wel weg.
+- Faalt Mímir toch (timeout, 503 enz.), dan komt de data direct uit BC en zet Mercurius een *versheidsvloer* (`web/cache/odata/mimir_freshness_floor.json`) voor die query. Volgende gewone loads vragen Mímir dan `max_age = nu − moment van Actualiseren`, zodat Mímir ook live ophaalt en zijn cache bijwerkt. Faalt Mímir dan weer, dan serveert de fallback de live kopie uit de lokale filecache. Na een geslaagde Mímir-aanroep verdwijnt de vloer.
+
+Daarna haalt JavaScript de parameter uit de URL (`history.replaceState`). Een navigatie vanaf een andere site (`Sec-Fetch-Site: cross-site`/`same-site`) forceert niets. Naast de knop staat dan "Live bijgewerkt om HH:MM", met `data-mimir-from-live`, `data-mimir-from-cache`, `data-bc-direct-live` en `data-mimir-fallback` voor controle. De bedrijvenlijst (Mímir `companies.php`) heeft geen force-optie en komt uit Mímirs nightly-cache.
+
+## Bedrijfskeuze
+
+Zonder `?company=` kiest Mercurius het laatst gekozen bedrijf van de gebruiker (`web/cache/user_prefs.json`, sleutel = hash van het e-mailadres), dan het bedrijf uit de sessie, dan Koninklijke van Twist en anders het eerste bedrijf uit de lijst. Het gekozen bedrijf komt via `history.replaceState` in de URL.
 
 ## Nightly cache warm
 
