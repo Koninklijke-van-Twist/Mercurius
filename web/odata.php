@@ -1043,6 +1043,70 @@ function odata_mimir_filter_for_request($filter)
 }
 
 /**
+ * Actualiseren: één paginaload waarin elke OData-fetch live moet zijn.
+ * Zolang dit actief is stuurt elke Mímir query.php-aanroep max_age=0 (Mímir haalt live
+ * bij BC op en slaat het resultaat weer in zijn cache op) en slaat de directe BC-fallback
+ * het lezen van de lokale odata-filecache over (het verse antwoord wordt wel weggeschreven).
+ */
+function odata_force_refresh_set(bool $active): void
+{
+    $GLOBALS['MERCURIUS_FORCE_REFRESH'] = $active;
+}
+
+function odata_force_refresh_active(): bool
+{
+    return !empty($GLOBALS['MERCURIUS_FORCE_REFRESH']);
+}
+
+/**
+ * Eenmalige ?actualiseren=1 uit de knop "Actualiseren". Cross-site navigaties
+ * (Sec-Fetch-Site: cross-site / same-site) mogen geen live BC-load afdwingen.
+ *
+ * @param array<string, mixed> $query
+ * @param array<string, mixed> $server
+ */
+function odata_force_refresh_requested(array $query, array $server): bool
+{
+    $flag = $query['actualiseren'] ?? '';
+    if (!is_string($flag) || trim($flag) !== '1') {
+        return false;
+    }
+    $site = strtolower(trim((string) ($server['HTTP_SEC_FETCH_SITE'] ?? '')));
+    return $site === '' || $site === 'same-origin' || $site === 'none';
+}
+
+/**
+ * Verzamelt meta uit Mímir query-antwoorden van dit verzoek (voor de Actualiseren-melding).
+ *
+ * @param array<string, mixed> $meta
+ */
+function odata_mimir_remember_meta(string $company, string $table, array $meta): void
+{
+    if (!isset($GLOBALS['MERCURIUS_MIMIR_META']) || !is_array($GLOBALS['MERCURIUS_MIMIR_META'])) {
+        $GLOBALS['MERCURIUS_MIMIR_META'] = [];
+    }
+    $GLOBALS['MERCURIUS_MIMIR_META'][] = [
+        'company' => $company,
+        'table' => $table,
+        'max_age' => isset($meta['max_age']) ? (int) $meta['max_age'] : null,
+        'from_cache' => isset($meta['from_cache']) ? (int) $meta['from_cache'] : null,
+        'from_live' => isset($meta['from_live']) ? (int) $meta['from_live'] : null,
+        'fetched_at_min' => isset($meta['fetched_at_min']) ? (int) $meta['fetched_at_min'] : null,
+        'fetched_at_max' => isset($meta['fetched_at_max']) ? (int) $meta['fetched_at_max'] : null,
+        'source' => isset($meta['source']) && is_string($meta['source']) ? $meta['source'] : null,
+    ];
+}
+
+/**
+ * @return list<array<string, mixed>>
+ */
+function odata_mimir_request_meta(): array
+{
+    $meta = $GLOBALS['MERCURIUS_MIMIR_META'] ?? [];
+    return is_array($meta) ? array_values($meta) : [];
+}
+
+/**
  * max_age for a Mímir query. forceRefresh must miss fresh coverage (OpenAPI minimum is 0;
  * there is no separate force flag). ttl 0 without forceRefresh keeps the previous 1h default.
  */
@@ -1068,7 +1132,8 @@ function odata_mimir_query_body(string $company, string $table, array $odataQuer
     $body = [
         'company' => $company,
         'table' => $table,
-        'max_age' => max(0, $ttlSeconds),
+        // Actualiseren forceert max_age=0 voor elke query in dit verzoek.
+        'max_age' => odata_force_refresh_active() ? 0 : max(0, $ttlSeconds),
         'top' => 0,
     ];
 
@@ -1120,6 +1185,9 @@ function odata_mimir_query_impl(string $company, string $table, array $odataQuer
     $response = odata_mimir_request('POST', 'query.php', $body);
     if (!isset($response['value']) || !is_array($response['value'])) {
         odata_mimir_fail(new Exception("Mímir query-antwoord mist 'value'."));
+    }
+    if (isset($response['meta']) && is_array($response['meta'])) {
+        odata_mimir_remember_meta($company, $table, $response['meta']);
     }
     /** @var list<array<string, mixed>> $value */
     $value = $response['value'];
@@ -1269,6 +1337,7 @@ function odata_get_all(string $url, array $auth, $ttlSeconds = 300, bool $forceR
 {
     consolelog("Fetching $url\n");
     $ttlSeconds = max(0, (int) $ttlSeconds);
+    $forceRefresh = $forceRefresh || odata_force_refresh_active();
 
     if (odata_mimir_enabled()) {
         return odata_mimir_or_direct(
@@ -1301,6 +1370,8 @@ function odata_get_all(string $url, array $auth, $ttlSeconds = 300, bool $forceR
 function odata_get_all_direct(string $url, array $auth, $ttlSeconds = 300, bool $forceRefresh = false): array
 {
     $ttlSeconds = max(1, (int) $ttlSeconds);
+    // Actualiseren: lokale filecache niet lezen, wel opnieuw vullen met het live antwoord.
+    $forceRefresh = $forceRefresh || odata_force_refresh_active();
     if (isset($GLOBALS['MERCURIUS_ODATA_BC_FETCH']) && is_callable($GLOBALS['MERCURIUS_ODATA_BC_FETCH'])) {
         return $GLOBALS['MERCURIUS_ODATA_BC_FETCH']($url, $auth, $ttlSeconds);
     }
