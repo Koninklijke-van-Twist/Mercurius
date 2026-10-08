@@ -18,6 +18,11 @@ require __DIR__ . "/auth.php";
 require_once __DIR__ . "/logincheck.php";
 require_once __DIR__ . "/odata.php";
 
+// Actualiseren (?actualiseren=1, eenmalig): elke OData-fetch in deze paginaload gaat live
+// naar Business Central (Mímir max_age=0, lokale filecache overgeslagen).
+$actualiserenActive = odata_force_refresh_requested($_GET, $_SERVER);
+odata_force_refresh_set($actualiserenActive);
+
 $companyDiscoveryError = '';
 $companies = [];
 $companyEnvironmentMap = [];
@@ -672,6 +677,57 @@ if (isset($isMailReport) && $isMailReport) {
             color: var(--ink);
         }
 
+        .refresh-area {
+            position: absolute;
+            top: -27px;
+            right: 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .refresh-area .refresh-note {
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        .refresh-area .refresh-button {
+            font-size: 12px;
+            padding: 4px 10px;
+        }
+
+        .refresh-modal {
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 16px;
+            width: min(460px, calc(100% - 30px));
+            background: var(--panel);
+            color: var(--ink);
+        }
+
+        .refresh-modal::backdrop {
+            background: rgba(0, 0, 0, 0.35);
+        }
+
+        .refresh-modal p {
+            margin: 0 0 14px;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        .button-primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+            font-weight: 600;
+        }
+
         <?php if (!$isMailReport): ?>
             @media print {
 
@@ -805,12 +861,27 @@ if (isset($isMailReport) && $isMailReport) {
         <div class="print-date">Datum: <?= htmlspecialchars($todayFormatted) ?></div>
         <?php if (!$isMailReport && $companyDiscoveryError === ''): ?>
             <form class="controls" method="get">
-                <?= injectTimerHtml([
-                    'statusUrl' => 'odata.php?action=cache_status',
-                    'title' => 'Cachebestanden',
-                    'label' => 'Cache',
-                    'css' => '{{root}} .odata-cache-widget{top:-23px;left:auto;right:0px;} {{root}} .odata-cache-popout{top:64px;left:auto;right:20px;}'
-                ]) ?>
+                <div class="refresh-area">
+                    <?php if ($actualiserenActive): ?>
+                        <?php
+                        $refreshMeta = odata_mimir_request_meta();
+                        $refreshLive = 0;
+                        $refreshCached = 0;
+                        foreach ($refreshMeta as $refreshItem) {
+                            $refreshLive += (int) ($refreshItem['from_live'] ?? 0);
+                            $refreshCached += (int) ($refreshItem['from_cache'] ?? 0);
+                        }
+                        $refreshAt = new DateTime('now', new DateTimeZone('Europe/Amsterdam'));
+                        $refreshTitle = 'Live opgehaald uit Business Central op ' . $refreshAt->format('d-m-Y H:i:s');
+                        if ($refreshMeta !== []) {
+                            $refreshTitle .= ' (Mímir: ' . $refreshLive . ' rijen live, ' . $refreshCached . ' uit cache)';
+                        }
+                        ?>
+                        <span class="refresh-note" title="<?= htmlspecialchars($refreshTitle) ?>"
+                            data-mimir-from-live="<?= (int) $refreshLive ?>" data-mimir-from-cache="<?= (int) $refreshCached ?>">Live bijgewerkt om <?= htmlspecialchars($refreshAt->format('H:i')) ?></span>
+                    <?php endif; ?>
+                    <button type="button" id="refreshButton" class="refresh-button">Actualiseren</button>
+                </div>
                 <a class="button-link" href="mail_report.php">Mailrapportage</a>
                 <a id="csvExportLink" class="button-link" href="export.php?company=<?= urlencode($selectedCompany) ?>&party_mode=<?= urlencode($partyMode) ?>">CSV Export</a>
                 <input id="filterInput" type="hidden" name="filter" value="<?= htmlspecialchars($filter) ?>" />
@@ -1013,6 +1084,38 @@ if (isset($isMailReport) && $isMailReport) {
             </table>
         </section>
     <?php endforeach; ?>
+
+    <?php if (!$isMailReport && $companyDiscoveryError === ''): ?>
+        <dialog id="refreshModal" class="refresh-modal" aria-labelledby="refreshModalText">
+            <p id="refreshModalText">Actualiseren verwijdert de cache en haalt live Business Central gegevens op. Dat kan een momentje duren.</p>
+            <div class="modal-actions">
+                <button type="button" id="refreshConfirm" class="button-primary">Uitvoeren</button>
+                <button type="button" id="refreshCancel">Annuleren</button>
+            </div>
+        </dialog>
+    <?php endif; ?>
+
+    <?php if (!$isMailReport): ?>
+        <script>
+            (function ()
+            {
+                // Eenmalige ?actualiseren=1 uit de URL halen, zodat F5 niet opnieuw live ophaalt.
+                try
+                {
+                    const url = new URL(window.location.href);
+                    if (url.searchParams.has('actualiseren'))
+                    {
+                        url.searchParams.delete('actualiseren');
+                        window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+                    }
+                }
+                catch (error)
+                {
+                    // Oude browser: URL laten staan.
+                }
+            })();
+        </script>
+    <?php endif; ?>
 
 </body>
 
@@ -1219,9 +1322,77 @@ if (isset($isMailReport) && $isMailReport) {
                 });
             }
 
+            const refreshButton = document.getElementById('refreshButton');
+            const refreshModal = document.getElementById('refreshModal');
+            const refreshConfirm = document.getElementById('refreshConfirm');
+            const refreshCancel = document.getElementById('refreshCancel');
+            const pageLoaderBox = pageLoader ? pageLoader.querySelector('.page-loader__box') : null;
+            const pageLoaderDefaultText = pageLoaderBox ? pageLoaderBox.textContent : '';
+
+            function closeRefreshModal ()
+            {
+                if (refreshModal && refreshModal.open && typeof refreshModal.close === 'function')
+                {
+                    refreshModal.close();
+                }
+            }
+
+            if (refreshButton && refreshModal)
+            {
+                refreshButton.addEventListener('click', () =>
+                {
+                    if (typeof refreshModal.showModal === 'function')
+                    {
+                        refreshModal.showModal();
+                        if (refreshConfirm)
+                        {
+                            refreshConfirm.focus();
+                        }
+                    }
+                    else if (window.confirm(document.getElementById('refreshModalText').textContent))
+                    {
+                        refreshConfirm.click();
+                    }
+                });
+
+                // Escape sluit een <dialog> standaard (cancel-event); Annuleren sluit expliciet.
+                if (refreshCancel)
+                {
+                    refreshCancel.addEventListener('click', closeRefreshModal);
+                }
+
+                refreshModal.addEventListener('click', (event) =>
+                {
+                    if (event.target === refreshModal)
+                    {
+                        closeRefreshModal();
+                    }
+                });
+            }
+
+            if (refreshConfirm)
+            {
+                refreshConfirm.addEventListener('click', () =>
+                {
+                    closeRefreshModal();
+                    if (pageLoaderBox)
+                    {
+                        pageLoaderBox.textContent = 'Live gegevens ophalen uit Business Central...';
+                    }
+                    showPageLoader();
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('actualiseren', '1');
+                    window.location.replace(url.toString());
+                });
+            }
+
             window.addEventListener('pageshow', () =>
             {
                 hidePageLoader();
+                if (pageLoaderBox)
+                {
+                    pageLoaderBox.textContent = pageLoaderDefaultText;
+                }
             });
 
             window.addEventListener('popstate', () =>
