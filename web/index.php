@@ -1134,6 +1134,19 @@ if (isset($isMailReport) && $isMailReport) {
         </script>
     <?php endif; ?>
 
+
+<?php
+if (!function_exists('kvt_email_is_admin')) {
+    $__kvtUa = __DIR__ . '/lib/UserAccess.php';
+    if (is_file($__kvtUa)) {
+        require_once $__kvtUa;
+    }
+}
+$__kvtEmail = strtolower(trim((string) ($_SESSION['user']['email'] ?? '')));
+if ($__kvtEmail !== '' && function_exists('kvt_email_is_admin') && kvt_email_is_admin($__kvtEmail)):
+?>
+<p style="margin:12px 20px"><a href="admin_users.php">Gebruikersbeheer</a></p>
+<?php endif; ?>
 </body>
 
 <?php if (!$isMailReport && $companyDiscoveryError === ''): ?>
