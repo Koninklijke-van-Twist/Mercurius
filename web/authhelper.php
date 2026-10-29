@@ -1,16 +1,28 @@
 <?php
 
-function auth_start_session_if_possible(): void
+/**
+ * Opent de sessie kort als dat kan. Geeft true terug als deze functie hem
+ * opende; de aanroeper sluit hem dan meteen weer met auth_release_session(),
+ * zodat trage BC/Mímir-calls het sessielock niet vasthouden.
+ */
+function auth_start_session_if_possible(): bool
 {
     if (session_status() !== PHP_SESSION_NONE) {
-        return;
+        return false;
     }
 
     if (headers_sent()) {
-        return;
+        return false;
     }
 
-    @session_start();
+    return @session_start();
+}
+
+function auth_release_session(bool $opened): void
+{
+    if ($opened && session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
 }
 
 
@@ -328,10 +340,11 @@ function auth_set_company_environment_map(array $map): void
 {
     $GLOBALS['companyEnvironmentMap'] = $map;
 
-    auth_start_session_if_possible();
+    $opened = auth_start_session_if_possible();
     if (session_status() === PHP_SESSION_ACTIVE) {
         $_SESSION['company_environment_map'] = $map;
     }
+    auth_release_session($opened);
 }
 
 function auth_get_company_environment_map(): array
@@ -340,9 +353,10 @@ function auth_get_company_environment_map(): array
         return $GLOBALS['companyEnvironmentMap'];
     }
 
-    auth_start_session_if_possible();
-    if (session_status() === PHP_SESSION_ACTIVE) {
-        $map = $_SESSION['company_environment_map'] ?? [];
+    $opened = auth_start_session_if_possible();
+    $map = $_SESSION['company_environment_map'] ?? [];
+    auth_release_session($opened);
+    if (isset($_SESSION) && is_array($_SESSION)) {
         if (is_array($map)) {
             $GLOBALS['companyEnvironmentMap'] = $map;
             return $map;
@@ -375,14 +389,16 @@ function getEnvironmentForCompany(string $company): string
 
 function auth_store_selected_company_context(string $company): void
 {
-    auth_start_session_if_possible();
+    // Eerst de (mogelijk trage) environment-lookup, pas daarna kort de sessie in.
+    $environment = getEnvironmentForCompany($company);
+    $opened = auth_start_session_if_possible();
     if (session_status() !== PHP_SESSION_ACTIVE) {
         return;
     }
 
-    $environment = getEnvironmentForCompany($company);
     $_SESSION['selected_company'] = $company;
     $_SESSION['selected_environment'] = $environment;
+    auth_release_session($opened);
 }
 
 
